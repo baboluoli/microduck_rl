@@ -9,12 +9,12 @@ observation/action ABI remains the existing 61 → 14 contract.
 ## Run it on RunPod
 
 The MacBook is for editing and reviewing. Training should run in a Linux GPU
-pod with a CUDA-capable NVIDIA GPU. Push this branch to a GitHub fork, then
-clone that fork in the RunPod pod and run:
+pod with a CUDA-capable NVIDIA GPU. In your RunPod pod, clone the fork and
+task branch that contain this environment, then run:
 
 ```bash
 cd /workspace
-git clone https://github.com/<your-account>/microduck_rl.git
+git clone --branch codex/hole-descent https://github.com/baboluoli/microduck_rl.git
 cd microduck_rl
 uv sync
 
