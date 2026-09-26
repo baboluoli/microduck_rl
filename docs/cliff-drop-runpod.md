@@ -38,16 +38,17 @@ uv run train Mjlab-CliffDrop-Flat-MicroDuck \
 ```
 
 The runner saves `model_250.pt`, `model_500.pt`, `model_750.pt`, and
-`model_1000.pt` (`save_interval=250`). On a GPU pod, inspect the selected
+`model_999.pt` (`save_interval=250`; the final checkpoint uses the zero-based
+last iteration). On a GPU pod, inspect the selected
 checkpoint in the simulator:
 
 ```bash
 uv run play Mjlab-CliffDrop-Flat-MicroDuck \
-  --checkpoint-file logs/rsl_rl/cliff_drop/<run-directory>/model_1000.pt
+  --checkpoint-file logs/rsl_rl/cliff_drop/<run-directory>/model_999.pt
 ```
 
 Resume from that checkpoint with `--agent.resume True` and
-`--agent.load-checkpoint model_1000.pt`. In mjlab 1.3.0,
+`--agent.load-checkpoint model_999.pt`. In mjlab 1.3.0,
 `--agent.max-iterations` counts **additional** iterations, so 9,000 more
 reaches 10,000 total:
 
@@ -56,7 +57,7 @@ uv run train Mjlab-CliffDrop-Flat-MicroDuck \
   --env.scene.num-envs 2048 \
   --agent.resume True \
   --agent.load-run <run-directory> \
-  --agent.load-checkpoint model_1000.pt \
+  --agent.load-checkpoint model_999.pt \
   --agent.max-iterations 9000 \
   --agent.run-name cliff-drop-continued
 ```
