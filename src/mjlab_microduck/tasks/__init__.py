@@ -63,6 +63,10 @@ from .microduck_roller_slope_env_cfg import (
     make_microduck_roller_slope_env_cfg,
     MicroduckRollerSlopeRlCfg,
 )
+from .microduck_hole_descent_env_cfg import (
+    make_microduck_hole_descent_env_cfg,
+    MicroduckHoleDescentRlCfg,
+)
 from .microduck_roller_standup_env_cfg import (
     make_microduck_roller_standup_env_cfg,
     MicroduckRollerStandUpRlCfg,
@@ -203,6 +207,15 @@ register_mjlab_task(
     env_cfg=make_microduck_roller_slope_env_cfg(),
     play_env_cfg=make_microduck_roller_slope_env_cfg(play=True),
     rl_cfg=MicroduckRollerSlopeRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+# Bipedal walking over generated flat/slope approaches into a shallow trench.
+register_mjlab_task(
+    task_id="Mjlab-HoleDescent-Flat-MicroDuck",
+    env_cfg=make_microduck_hole_descent_env_cfg(),
+    play_env_cfg=make_microduck_hole_descent_env_cfg(play=True),
+    rl_cfg=MicroduckHoleDescentRlCfg,
     runner_cls=MicroduckOnPolicyRunner,
 )
 

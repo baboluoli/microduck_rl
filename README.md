@@ -76,6 +76,7 @@ instead of locally (see [scripts/hf/README.md](scripts/hf/README.md)).
 | `Mjlab-Velocity-Swizzle-MicroDuck` | flat | Classic symmetric swizzle skating |
 | `Mjlab-RollerCrouch-Flat-MicroDuck` | flat | Crouch while gliding on rollers |
 | `Mjlab-RollerSlope-Flat-MicroDuck` | slope | Glide down slopes on rollers |
+| `Mjlab-HoleDescent-Flat-MicroDuck` | generated | Biped walking over sampled flat/slope approaches and down/up a shallow trench |
 | `Mjlab-RollerStandUp-Flat-MicroDuck` | flat | Stand up from the ground onto the wheels |
 | `Mjlab-Spin-Flat-MicroDuck` | flat | Fast spin in place on rollers |
 
@@ -94,6 +95,9 @@ The servos are simulated with the same BAM M6 XL330 model the policies are
 trained against (voltage control + load-dependent friction, via
 `bam.mujoco.MujocoController`); `--vin` / `--vin-drop-gain` / `--kp-fw` pin the
 training DR ranges to one value, `--no-bam` falls back to the XML PD actuators.
+
+The generated biped hole-descent task and RunPod launch commands are documented
+in [`docs/hole-descent-runpod.md`](docs/hole-descent-runpod.md).
 
 ### Backlash variants
 
