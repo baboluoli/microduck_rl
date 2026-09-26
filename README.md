@@ -101,6 +101,8 @@ The generated biped hole-descent task and RunPod launch commands are documented
 in [`docs/hole-descent-runpod.md`](docs/hole-descent-runpod.md).
 The separate vertical cliff task is documented in
 [`docs/cliff-drop-runpod.md`](docs/cliff-drop-runpod.md).
+The first 3,000-update training run and its revision plan are documented in
+[`docs/cliff-drop-3000-report.md`](docs/cliff-drop-3000-report.md).
 
 ### Backlash variants
 

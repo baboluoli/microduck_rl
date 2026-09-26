@@ -1,5 +1,8 @@
 # Cliff drop: first training pass
 
+The first 3,000-update pilot did not learn the variable-height objective. Read
+the [run report](cliff-drop-3000-report.md) before repeating or extending it.
+
 `Mjlab-CliffDrop-Flat-MicroDuck` starts Microduck 55 cm before a vertical ledge.
 The lower landing floor is 2–10 cm below the upper platform. The terrain
 curriculum starts at 2 cm and raises the maximum sampled drop height only
