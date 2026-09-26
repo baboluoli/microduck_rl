@@ -67,6 +67,10 @@ from .microduck_hole_descent_env_cfg import (
     make_microduck_hole_descent_env_cfg,
     MicroduckHoleDescentRlCfg,
 )
+from .microduck_cliff_drop_env_cfg import (
+    make_microduck_cliff_drop_env_cfg,
+    MicroduckCliffDropRlCfg,
+)
 from .microduck_roller_standup_env_cfg import (
     make_microduck_roller_standup_env_cfg,
     MicroduckRollerStandUpRlCfg,
@@ -219,6 +223,15 @@ register_mjlab_task(
     runner_cls=MicroduckOnPolicyRunner,
 )
 
+# Walk off a vertical ledge, land on the lower floor, and keep walking.
+register_mjlab_task(
+    task_id="Mjlab-CliffDrop-Flat-MicroDuck",
+    env_cfg=make_microduck_cliff_drop_env_cfg(),
+    play_env_cfg=make_microduck_cliff_drop_env_cfg(play=True),
+    rl_cfg=MicroduckCliffDropRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
 # Roller STANDUP — se relever sur rollers (policy dédiée, départ au sol).
 register_mjlab_task(
     task_id="Mjlab-RollerStandUp-Flat-MicroDuck",
@@ -271,6 +284,7 @@ _BACKLASH_TASKS = (
     ("Mjlab-Velocity-Rough-Backlash-MicroDuck", make_microduck_velocity_env_cfg, {"rough": True}, MicroduckRlCfg, _BL_WALK),
     ("Mjlab-VelStand-Flat-Backlash-MicroDuck", make_microduck_velstand_env_cfg, {}, MicroduckVelStandRlCfg, _BL_ALLCOLLISIONS),
     ("Mjlab-VelStand-Rough-Backlash-MicroDuck", make_microduck_velstand_env_cfg, {"rough": True}, MicroduckVelStandRlCfg, _BL_ALLCOLLISIONS),
+    ("Mjlab-CliffDrop-Flat-Backlash-MicroDuck", make_microduck_cliff_drop_env_cfg, {}, MicroduckCliffDropRlCfg, _BL_ALLCOLLISIONS),
     ("Mjlab-StandUp-Flat-Backlash-MicroDuck", make_microduck_standup_env_cfg, {}, MicroduckStandUpRlCfg, _BL_GROUNDCONTACT),
     ("Mjlab-StandUp-Rough-Backlash-MicroDuck", make_microduck_standup_env_cfg, {"rough": True}, MicroduckStandUpRlCfg, _BL_GROUNDCONTACT),
     ("Mjlab-SitStand-Flat-Backlash-MicroDuck", make_microduck_sitstand_env_cfg, {}, MicroduckSitStandRlCfg, _BL_GROUNDCONTACT),

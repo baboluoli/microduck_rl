@@ -77,6 +77,7 @@ instead of locally (see [scripts/hf/README.md](scripts/hf/README.md)).
 | `Mjlab-RollerCrouch-Flat-MicroDuck` | flat | Crouch while gliding on rollers |
 | `Mjlab-RollerSlope-Flat-MicroDuck` | slope | Glide down slopes on rollers |
 | `Mjlab-HoleDescent-Flat-MicroDuck` | generated | Biped walking over sampled flat/slope approaches and down/up a shallow trench |
+| `Mjlab-CliffDrop-Flat-MicroDuck` | generated | Walk off a vertical ledge, land on the lower floor, then continue walking; drop height 2–10 cm |
 | `Mjlab-RollerStandUp-Flat-MicroDuck` | flat | Stand up from the ground onto the wheels |
 | `Mjlab-Spin-Flat-MicroDuck` | flat | Fast spin in place on rollers |
 
@@ -98,6 +99,8 @@ training DR ranges to one value, `--no-bam` falls back to the XML PD actuators.
 
 The generated biped hole-descent task and RunPod launch commands are documented
 in [`docs/hole-descent-runpod.md`](docs/hole-descent-runpod.md).
+The separate vertical cliff task is documented in
+[`docs/cliff-drop-runpod.md`](docs/cliff-drop-runpod.md).
 
 ### Backlash variants
 
