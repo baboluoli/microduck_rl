@@ -13,7 +13,8 @@ verified. Do not deploy this policy or resume it unchanged for a longer run.
   `22f49d1` (the later `2c6073a` commit only corrected documentation).
 - RunPod Pod `vfu4f830huzjn3`: one RTX 4090, 2,048 training environments,
   50 GB persistent `/workspace` volume, PyTorch CUDA image. The Pod was
-  stopped and confirmed `runtimeStatus=stopped` at 21:35 UTC.
+  stopped at 21:35 UTC, then deleted after the local artifact copies were
+  verified. RunPod listed no remaining Pods or separate network volumes.
 - A 64-environment, 5-iteration smoke run completed first. Then the main run
   completed 1,000 PPO updates, saved `model_999.pt`, and resumed for 2,000
   additional updates. The resumed runner's final checkpoint is
@@ -116,4 +117,6 @@ was nonzero in some earlier windows.
   including `model_2998.pt` and `events.out.tfevents.*`.
 - Both directories are ignored by Git. The setup and launch commands are in
   [`cliff-drop-runpod.md`](cliff-drop-runpod.md).
-
+- The remote Pod and its Pod volume have been deleted. These local ignored
+  directories are the remaining checkpoint copies; the report itself is
+  committed to Git.
