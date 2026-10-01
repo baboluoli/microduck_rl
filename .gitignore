@@ -38,3 +38,8 @@ backup_onnx/
 logdir/.claude/
 logdir/
 logdir/.claude/worktrees/
+
+# Local cliff evaluation outputs (recreated by scripts/eval_cliff_drop.py)
+docs/cliff-eval-*.csv
+docs/cliff-eval-*.json
+docs/cliff-eval-*.mp4

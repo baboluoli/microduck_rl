@@ -111,6 +111,51 @@ was nonzero in some earlier windows.
 
 ## Local artifacts
 
+The headless first-stage comparison is implemented in
+[`scripts/eval_cliff_drop.py`](../scripts/eval_cliff_drop.py). On a machine with
+the project's mjlab dependencies installed, run:
+
+```bash
+uv run python scripts/eval_cliff_drop.py \
+  logs/rsl_rl/cliff_drop/2026-09-26_20-12-42_cliff-drop-first-1000/model_999.pt \
+  logs/rsl_rl/cliff_drop/2026-09-26_20-40-00_cliff-drop-to-3000/model_2998.pt \
+  --num-envs 64 --seed 0 --output docs/cliff-eval-2cm-seed0
+```
+
+It writes `cliff-eval-2cm-seed0.csv` with one first episode per environment
+and `cliff-eval-2cm-seed0.json` with outcome counts. These generated files
+are kept locally and ignored by Git.
+For paired video, add `--video-env 2` and use
+`--output docs/cliff-eval-2cm-video-env2`; this renders the selected first
+episode at 25 fps while evaluating the same 64 environments.
+Both checkpoints use the same seed,
+upper-platform starts, 2 cm drop, 0.21 m/s command, and neutral head/body
+commands. `lower_contact` is a stage proxy: foot contact after the trunk has
+moved 15 cm beyond the edge. The task's own completion gate determines
+`complete`. The inherited `out_of_terrain_bounds` termination was disabled
+for this evaluation because it truncated valid outer grid tiles at step one.
+The simulator still used the cliff terrain and its physical collisions.
+
+The local CPU run used the project's pinned Python 3.12 environment and
+finished all 128 first episodes. Results:
+
+| Checkpoint | Reached edge | Contact proxy | Completed | Median max forward travel |
+| --- | ---: | ---: | ---: | ---: |
+| 999 | 41/64 | 27/64 | 13/64 | 0.647 m |
+| 2998 | 3/64 | 2/64 | 0/64 | 0.260 m |
+
+The continuation appears to have lost the ability to approach the edge under
+these fixed conditions. These are simulated episodes at one drop height and
+one seed. A paired offscreen recording of environment 2 shows checkpoint 999
+walking off the ledge, landing on the lower platform, and continuing forward;
+checkpoint 2998 remains on the upper platform through the 10 s timeout:
+
+- `cliff-eval-2cm-video-env2-model_999-env2.mp4` — 6.7 s, task completion.
+- `cliff-eval-2cm-video-env2-model_2998-env2.mp4` — 10 s, no edge crossing.
+
+These videos show one paired episode. The per-episode CSV above is the basis
+for the 64-episode counts.
+
 - Stage 1: `logs/rsl_rl/cliff_drop/2026-09-26_20-12-42_cliff-drop-first-1000/`
   including `model_999.pt` and `events.out.tfevents.*`.
 - Continuation: `logs/rsl_rl/cliff_drop/2026-09-26_20-40-00_cliff-drop-to-3000/`
