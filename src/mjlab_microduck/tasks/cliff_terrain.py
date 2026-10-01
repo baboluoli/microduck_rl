@@ -12,15 +12,15 @@ from mjlab.terrains.terrain_generator import SubTerrainCfg, TerrainGeometry, Ter
 class CliffDropTerrainCfg(SubTerrainCfg):
     """Two flat platforms separated by an unsupported vertical drop.
 
-    The approach and edge stay fixed relative to the spawn. Difficulty widens
-    the sampled drop-height range, so every curriculum row still contains
-    multiple heights rather than one memorized landing.
+    Curriculum rows are explicit height buckets. The training stage controls
+    which rows can be sampled; failed episodes never lower that stage.
     """
 
     edge_x: float = 1.5
     spawn_x: float = 0.95
     min_drop: float = 0.02
     max_drop: float = 0.10
+    height_buckets: tuple[float, ...] = (0.02, 0.04, 0.06, 0.08, 0.10)
     thickness: float = 0.3
 
     def function(self, difficulty: float, spec: mujoco.MjSpec, rng) -> TerrainOutput:
@@ -29,9 +29,12 @@ class CliffDropTerrainCfg(SubTerrainCfg):
         if not 0.0 < self.min_drop <= self.max_drop < self.thickness:
             raise ValueError("cliff drop heights must fit inside the platform thickness")
 
-        d = float(np.clip(difficulty, 0.0, 1.0))
-        high = self.min_drop + d * (self.max_drop - self.min_drop)
-        drop = float(rng.uniform(self.min_drop, high))
+        if self.min_drop == self.max_drop:
+            drop = self.min_drop  # fixed-height evaluation
+        else:
+            bucket = min(int(np.clip(difficulty, 0.0, 1.0) * len(self.height_buckets)),
+                         len(self.height_buckets) - 1)
+            drop = self.height_buckets[bucket]
         width = self.size[1] - 0.3
         terrain = spec.body("terrain")
         geoms = []

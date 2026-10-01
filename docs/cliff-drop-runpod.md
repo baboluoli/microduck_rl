@@ -1,74 +1,74 @@
-# Cliff drop: first training pass
+# Cliff drop: staged experiment
 
-The first 3,000-update pilot did not learn the variable-height objective. Read
-the [run report](cliff-drop-3000-report.md) before repeating or extending it.
+The earlier 3,000-update run did not establish a reliable approach or drop.
+See the [run report](cliff-drop-3000-report.md). Do not resume checkpoint 2998
+unchanged.
 
-`Mjlab-CliffDrop-Flat-MicroDuck` starts Microduck 55 cm before a vertical ledge.
-The lower landing floor is 2–10 cm below the upper platform. The terrain
-curriculum starts at 2 cm and raises the maximum sampled drop height only
-after successful episodes. There is no ramp, route search, or steering task.
-The actor keeps the standard 61-observation / 14-action runtime interface.
-During training, 35% of resets begin just past the edge and already falling,
-so the policy can practice landings before it learns the entire approach.
-Play mode always begins on the upper platform.
+The current task keeps the 61D actor observation and uses the existing twist
+yaw-rate slot for a proportional correction toward world +X. Head and body
+commands stay near neutral. Head-command, CoM, and action-rate schedules are
+frozen at their initial values. Training starts at a fixed 2 cm drop.
 
-An episode succeeds when the robot travels at least 40 cm beyond the edge,
-has a foot on the lower floor, is within 30° of upright, has settled vertical
-motion, and walks forward for 0.3 s. A head contact above 15 N or trunk
-contact above 20 N invalidates that episode's success. Servo housing impact,
-servo acceleration spikes, stalls, and head/trunk impact costs shape the
-landing. These force limits are simulation
-training criteria, not a claim of hardware safety; inspect landing videos and
-force traces before trying a drop on the real robot.
+Height buckets are 2, 4, 6, 8, and 10 cm. Set
+`MICRODUCK_CLIFF_MAX_HEIGHT_CM` to one of these values before constructing a
+training environment. All buckets up to that height remain in the spawn mix.
+No episode automatically promotes or demotes a bucket. Change the maximum only
+after the evaluator's two-checkpoint gates pass across every configured seed.
 
-## RunPod training
+## Evaluate candidate initializations
 
-Use a Linux CUDA pod with persistent storage for logs and checkpoints. First
-run the short 64-environment smoke run, then stop at 1,000 iterations to
-inspect a checkpoint before spending time on a longer run:
+Evaluate checkpoint 999 and a compatible walking checkpoint on the **cliff
+robot model**. This battery uses upper-platform starts at every height, three
+seeds, and approach distances of 35, 55, and 75 cm. It writes per-episode CSV,
+per-height JSON summaries and gates, and representative success/failure videos.
+Add `--include-midair` to produce a separate midair-start section. Adjust
+`--num-envs` to reach the desired sample count per seed and condition.
 
 ```bash
-uv run list-envs | rg CliffDrop
-uv run train Mjlab-CliffDrop-Flat-MicroDuck \
-  --env.scene.num-envs 64 \
-  --agent.max-iterations 5 \
-  --agent.run-name cliff-drop-smoke
-
-uv run train Mjlab-CliffDrop-Flat-MicroDuck \
-  --env.scene.num-envs 2048 \
-  --agent.max-iterations 1000 \
-  --agent.run-name cliff-drop-first-1000
+uv run python scripts/eval_cliff_drop.py \
+  logs/rsl_rl/cliff_drop/<run>/model_999.pt \
+  <compatible-walking-checkpoint.pt> \
+  --num-envs 16 --output docs/cliff-baseline
 ```
 
-The runner saves `model_250.pt`, `model_500.pt`, `model_750.pt`, and
-`model_999.pt` (`save_interval=250`; the final checkpoint uses the zero-based
-last iteration). On a GPU pod, inspect the selected
-checkpoint in the simulator:
+Inspect the path-efficiency, heading-error, lateral-drift, edge-time, true
+lower-floor contact, and post-landing-travel columns. A completion is counted
+only if the task gate fires **and** a foot contact is located on the lower
+platform's top face. The contact sensor reports a contact position; the
+evaluator checks it against the selected tile's lower-floor footprint and
+height.
+
+Use `--legacy-command` for a diagnostic baseline with the old zero-yaw
+command. Keep its results in a separate output file; the default evaluation
+tests the new heading controller. The saved checkpoint 999 has so far reached
+the edge in 12/16 local 2 cm episodes under the legacy command and 0/16 under
+the initial heading controller, so warm-start selection must account for that
+command transition.
+
+## Advancement gates
+
+Evaluate every 100–250 updates during a short pilot. Supply two consecutive
+checkpoint paths in chronological order. The JSON gate report requires:
+
+- Straight approach: at least 95% reach the edge within a 15 cm corridor.
+- 2 cm: at least 90% complete the full sequence.
+- Higher buckets: at least 85% complete that bucket while 2 cm stays at least 90%.
+
+Each rate must pass independently for every evaluation seed at both
+checkpoints. Run the 64-environment, five-update smoke test first. Do not start
+a RunPod training run without asking the user, per `AGENTS.md`.
 
 ```bash
-uv run play Mjlab-CliffDrop-Flat-MicroDuck \
-  --checkpoint-file logs/rsl_rl/cliff_drop/<run-directory>/model_999.pt
+MICRODUCK_CLIFF_MAX_HEIGHT_CM=2 uv run train Mjlab-CliffDrop-Flat-MicroDuck \
+  --env.scene.num-envs 64 --agent.max-iterations 5
 ```
 
-Resume from that checkpoint with `--agent.resume True` and
-`--agent.load-checkpoint model_999.pt`. In mjlab 1.3.0,
-`--agent.max-iterations` counts **additional** iterations, so 9,000 more
-reaches 10,000 total:
+For a cross-task initialization, use `MICRODUCK_WARM_START=1` so the runner
+restarts curriculum and iteration counters when it loads the compatible
+checkpoint. Keep the checkpoint's observation normalizer. Select the source by
+straight walking and cliff approach performance, not by its name or iteration.
 
-```bash
-uv run train Mjlab-CliffDrop-Flat-MicroDuck \
-  --env.scene.num-envs 2048 \
-  --agent.resume True \
-  --agent.load-run <run-directory> \
-  --agent.load-checkpoint model_999.pt \
-  --agent.max-iterations 9000 \
-  --agent.run-name cliff-drop-continued
-```
-
-Keep the first run's checkpoint accessible when resuming. Training state
-(policy, optimizer, normalizers, and iteration counter) is restored; W&B may
-start a separate logging run. Before training, inspect a generated tile in
-simulation to confirm the upper and lower collision floors form a clean edge.
-Judge the checkpoint by success rate **at each drop height**, landing contacts,
-and whether it actually walks after impact. Export a selected checkpoint with
-`uv run scripts/export.py` so the observation normalizer is included.
+The next reward and reset-state changes should follow measured approach and
+landing failure modes. The current midair reset is still the earlier synthetic
+state; it is reported separately and should be replaced with states collected
+from real ledge departures before a landing-recovery pilot.

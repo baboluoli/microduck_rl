@@ -3795,16 +3795,6 @@ def cliff_landing_reward(env: ManagerBasedRlEnv, **kwargs) -> torch.Tensor:
     return cliff_landing_complete(env, **kwargs).float() / env.step_dt
 
 
-def cliff_terrain_levels(env: ManagerBasedRlEnv, env_ids: torch.Tensor) -> torch.Tensor:
-    """Increase drop height only after a safe landing and resumed forward walk."""
-    terrain = env.scene.terrain
-    assert terrain is not None
-    success = getattr(env, "_cliff_success", None)
-    move_up = success[env_ids] if success is not None else torch.zeros_like(env_ids, dtype=torch.bool)
-    terrain.update_env_origins(env_ids, move_up, ~move_up)
-    return torch.mean(terrain.terrain_levels.float())
-
-
 def velocity_command_ranges_curriculum(
     env: ManagerBasedRlEnv,
     env_ids: torch.Tensor,
