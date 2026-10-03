@@ -3680,6 +3680,32 @@ def terrain_levels_slope(env: ManagerBasedRlEnv, env_ids: torch.Tensor) -> torch
 
 
 # ── Cliff drop: reach the lower floor, land on the feet, keep walking ────────
+def cliff_forward_progress(
+    env: ManagerBasedRlEnv,
+    command_name: str = "twist",
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Signed world-X speed: standing/sideways travel earns zero, retreat costs.
+
+    Cap forward credit at commanded speed, and suppress positive credit while
+    tipped over. RewardManager multiplies by dt, making this a distance reward
+    below the speed cap; backwards travel cannot refill a progress jackpot.
+    """
+    robot = env.scene[asset_cfg.name].data
+    target = env.command_manager.get_command(command_name)[:, 0].clamp_min(0.01)
+    speed = torch.nan_to_num(robot.root_link_lin_vel_w[:, 0])
+    quat = robot.root_link_quat_w
+    upright = (1 - 2 * (quat[:, 1].square() + quat[:, 2].square())) > math.cos(math.radians(40))
+    positive = torch.minimum(speed.clamp_min(0), target) * upright
+    return (positive + speed.clamp_max(0)) / target
+
+
+def cliff_failed_landing(env: ManagerBasedRlEnv, **kwargs) -> torch.Tensor:
+    """End attempts already disqualified by the same impacts as success."""
+    cliff_landing_complete(env, **kwargs)
+    return env._cliff_bad_impact.clone()
+
+
 def cliff_midair_reset(
     env: ManagerBasedRlEnv,
     env_ids: torch.Tensor,

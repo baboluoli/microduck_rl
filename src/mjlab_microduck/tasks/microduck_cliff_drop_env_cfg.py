@@ -33,6 +33,35 @@ DROP_HEIGHT_RANGE = (0.02, 0.10)
 HEIGHT_BUCKETS_CM = (2, 4, 6, 8, 10)
 
 
+def _freeze_model999_conditions(cfg: ManagerBasedRlEnvCfg) -> None:
+    """Hold the original schedules immediately before the 1000-update boundary.
+
+    Checkpoint 999 stores counter 24000. Pose schedules use >= while reward
+    and CoM schedules use >, so that boundary is ambiguous for the last reset.
+    Use the last unambiguous stage (23999), avoiding the old continuation's
+    simultaneous increase in posture, CoM and smoothing demands.
+    """
+    source = make_microduck_velocity_env_cfg(play=False, rough=False)
+    for name in ("action_rate_weight", "head_pose_bias_weight"):
+        params = source.curriculum[name].params
+        stage = next(s for s in reversed(params["weight_stages"]) if s["step"] < 24000)
+        cfg.rewards[params["reward_name"]].weight = stage["weight"]
+    for name in ("head_pose_range", "body_pose_range"):
+        params = source.curriculum[name].params
+        stage = next(s for s in reversed(params["range_stages"]) if s["step"] < 24000)
+        cfg.commands[params["command_name"]].ranges = tuple(stage["ranges"])
+    for name in ("com_range", "head_com_range"):
+        if name in source.curriculum:
+            params = source.curriculum[name].params
+            stage = next(s for s in reversed(params["range_stages"]) if s["step"] < 24000)
+            cfg.events[params["event_name"]].params["ranges"] = (-stage["range"], stage["range"])
+    twist = cfg.commands["twist"]
+    twist.heading_command = False
+    twist.rel_heading_envs = 0.0
+    twist.ranges.heading = None
+    twist.ranges.ang_vel_z = (0.0, 0.0)
+
+
 def _max_height_bucket() -> int:
     """Training stage is advanced externally only after paired evaluation gates."""
     value = int(os.environ.get("MICRODUCK_CLIFF_MAX_HEIGHT_CM", "2"))
@@ -219,6 +248,29 @@ def make_microduck_cliff_drop_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
         params=completion_params,
     )
     cfg.curriculum.pop("terrain_levels", None)
+    profile = os.environ.get("MICRODUCK_CLIFF_PROFILE", "heading")
+    if profile in ("model999", "steering"):
+        _freeze_model999_conditions(cfg)
+        if profile == "steering":
+            # Requires prepare_cliff_steering_checkpoint.py for a zero-yaw
+            # source: its unused input column must not receive arbitrary new
+            # normalized values when the heading controller is enabled.
+            twist.heading_command = True
+            twist.rel_heading_envs = 1.0
+            twist.ranges.heading = (0.0, 0.0)
+            twist.heading_control_stiffness = 0.5
+            twist.ranges.ang_vel_z = (-0.3, 0.3)
+            cfg.events["cliff_midair_reset"].params["probability"] = 0.0
+            cfg.rewards["track_linear_velocity"] = RewardTermCfg(
+                func=microduck_mdp.cliff_forward_progress, weight=4.0,
+            )
+            cfg.terminations["cliff_failed_landing"] = TerminationTermCfg(
+                func=microduck_mdp.cliff_failed_landing,
+                params=dict(completion_params), time_out=False,
+            )
+            cfg.terminations["fallen_too_long"].params["max_duration_s"] = 0.5
+    elif profile != "heading":
+        raise ValueError("MICRODUCK_CLIFF_PROFILE must be heading, model999 or steering")
     return cfg
 
 

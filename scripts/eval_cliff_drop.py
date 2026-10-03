@@ -24,9 +24,11 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.managers import TerminationTermCfg
 from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
+from mjlab.terrains import TerrainEntityCfg
 from mjlab.utils.torch import configure_torch_backends
 
 from mjlab_microduck.tasks.microduck_cliff_drop_env_cfg import EDGE_DISTANCE, HEIGHT_BUCKETS_CM
+from mjlab_microduck.tasks import mdp as microduck_mdp
 
 TASK = "Mjlab-CliffDrop-Flat-MicroDuck"
 EDGE_CORRIDOR_M = 0.15
@@ -58,6 +60,8 @@ def _probe(env):
         "bad_impact": env._cliff_bad_impact.clone(),
         "stable_s": env._cliff_stable_s.clone(),
         "success": env._cliff_completed_this_step.clone(),
+        "peak_torque_nm": robot.actuator_force.abs().amax(dim=1).clone(),
+        "stall_count": microduck_mdp.servo_stall_penalty(env).clone(),
     }
     if getattr(env, "_cliff_eval_video_active", False) and env.common_step_counter % 2 == 0:
         env._cliff_eval_video_writer.append_data(env.render())
@@ -65,7 +69,7 @@ def _probe(env):
 
 
 def _configure(num_envs, seed, drop_m, approach_m, start, video_env=None,
-               legacy_command=False):
+               legacy_command=False, flat_ground=False):
     cfg = load_env_cfg(TASK, play=True)
     cfg.seed = seed
     cfg.scene.num_envs = num_envs
@@ -86,6 +90,10 @@ def _configure(num_envs, seed, drop_m, approach_m, start, video_env=None,
     cfg.curriculum.clear()
     # Grid-centered world bounds truncate valid outer tiles at step one.
     cfg.terminations.pop("out_of_terrain_bounds", None)
+    # Evaluate all profiles with the same observation window and success
+    # criterion, even when training ends disqualified attempts earlier.
+    cfg.terminations.pop("cliff_failed_landing", None)
+    cfg.terminations["fallen_too_long"].params["max_duration_s"] = 4.0
     cfg.events["cliff_midair_reset"].params["probability"] = 1.0 if start == "midair" else 0.0
     offset = EDGE_DISTANCE - approach_m
     cfg.events["reset_base"].params["pose_range"]["x"] = (offset, offset)
@@ -98,6 +106,14 @@ def _configure(num_envs, seed, drop_m, approach_m, start, video_env=None,
         twist.ranges.ang_vel_z = (0.0, 0.0)
     cfg.commands["head_pose"].ranges = ((0.0, 0.0),) * 4
     cfg.commands["body_pose"].ranges = ((0.0, 0.0),) * 6
+    if flat_ground:
+        if start != "upper":
+            raise ValueError("Flat-ground control requires an upper-platform start")
+        cfg.scene.terrain = TerrainEntityCfg(terrain_type="plane", env_spacing=4.0)
+        # Keep the task-state probe initialized, but observe a full ten seconds
+        # of walking instead of terminating at the virtual landing position.
+        cfg.terminations["cliff_landing"].params["min_stable_s"] = 1e9
+        cfg.rewards["cliff_landing"].params["min_stable_s"] = 1e9
     cfg.terminations["cliff_eval_probe"] = TerminationTermCfg(func=_probe, time_out=False)
     return cfg
 
@@ -119,10 +135,12 @@ def _is_lower_contact(snapshot, i, origin, drop_m):
 @torch.inference_mode()
 def evaluate(checkpoint: Path, *, num_envs: int, seed: int, device: str, drop_m: float,
              approach_m: float, start: str = "upper", video_env: int | None = None,
-             video_path: Path | None = None, legacy_command: bool = False):
+             video_path: Path | None = None, legacy_command: bool = False,
+             flat_ground: bool = False):
     if not checkpoint.is_file():
         raise FileNotFoundError(checkpoint)
-    cfg = _configure(num_envs, seed, drop_m, approach_m, start, video_env, legacy_command)
+    cfg = _configure(num_envs, seed, drop_m, approach_m, start, video_env, legacy_command,
+                     flat_ground)
     agent_cfg = load_rl_cfg(TASK)
     env = ManagerBasedRlEnv(cfg=cfg, device=device,
                             render_mode="rgb_array" if video_env is not None else None)
@@ -149,7 +167,8 @@ def evaluate(checkpoint: Path, *, num_envs: int, seed: int, device: str, drop_m:
         rows = [{
             "env": i, "checkpoint": str(checkpoint), "seed": seed,
             "height_cm": round(drop_m * 100), "approach_m": approach_m, "start": start,
-            "command_mode": "legacy_zero_yaw" if legacy_command else "world_heading",
+            "terrain_mode": "flat_control" if flat_ground else "cliff",
+            "command_mode": "world_heading" if cfg.commands["twist"].heading_command else "legacy_zero_yaw",
             "reached_edge": False, "edge_in_corridor": False, "time_to_edge_s": None,
             "lower_contact": False, "lower_contact_count": 0,
             "post_landing_travel_m": 0.0, "bad_impact": False, "success": False,
@@ -161,6 +180,7 @@ def evaluate(checkpoint: Path, *, num_envs: int, seed: int, device: str, drop_m:
             "max_x_m": -math.inf, "max_tilt_deg": 0.0,
             "max_head_force_n": 0.0, "max_trunk_force_n": 0.0,
             "max_stable_s": 0.0, "steps": 0, "done": False, "termination": "",
+            "peak_torque_nm": 0.0, "high_torque_low_speed_steps": 0,
         } for i in range(num_envs)]
         previous = [None] * num_envs
         first_contact_x = [None] * num_envs
@@ -195,6 +215,8 @@ def evaluate(checkpoint: Path, *, num_envs: int, seed: int, device: str, drop_m:
                 row["max_head_force_n"] = max(row["max_head_force_n"], float(snapshot["head_force"][i]))
                 row["max_trunk_force_n"] = max(row["max_trunk_force_n"], float(snapshot["trunk_force"][i]))
                 row["max_stable_s"] = max(row["max_stable_s"], float(snapshot["stable_s"][i]))
+                row["peak_torque_nm"] = max(row["peak_torque_nm"], float(snapshot["peak_torque_nm"][i]))
+                row["high_torque_low_speed_steps"] += int(snapshot["stall_count"][i] > 0)
                 if start == "upper" and not row["reached_edge"] and x >= EDGE_DISTANCE:
                     row["reached_edge"] = True
                     row["time_to_edge_s"] = row["steps"] * env.step_dt
@@ -230,6 +252,11 @@ def evaluate(checkpoint: Path, *, num_envs: int, seed: int, device: str, drop_m:
             row["path_efficiency"] = max(row["forward_progress_m"], 0.0) / max(row["distance_traveled_m"], 1e-9)
             if not row["done"]:
                 row["outcome"] = "incomplete_evaluation"
+            elif flat_ground:
+                row["outcome"] = (
+                    "flat_upright" if row["max_tilt_deg"] < 45 and not row["bad_impact"]
+                    and row["termination"] == "time_out" else "flat_fall"
+                )
             elif row["success"] and row["lower_contact"]:
                 row["outcome"] = "complete"
             elif start == "upper" and not row["reached_edge"]:
@@ -352,20 +379,33 @@ def main():
         writer.writerows(rows)
     summary = summarize(rows, args.checkpoints)
     videos = []
+    video_results = []
     video_errors = []
     for (checkpoint, start, label), (cm, seed, distance, env_idx) in representatives.items():
         path = args.output.with_name(f"{args.output.name}-{Path(checkpoint).stem}-{start}-{label}-{cm}cm-seed{seed}-env{env_idx}.mp4")
         try:
-            evaluate(Path(checkpoint), num_envs=args.num_envs, seed=seed, device=args.device,
-                     drop_m=cm / 100, approach_m=distance, start=start,
-                     video_env=env_idx, video_path=path,
-                     legacy_command=args.legacy_command)
+            replay = evaluate(Path(checkpoint), num_envs=args.num_envs, seed=seed, device=args.device,
+                              drop_m=cm / 100, approach_m=distance, start=start,
+                              video_env=env_idx, video_path=path,
+                              legacy_command=args.legacy_command)
         except Exception as exc:
             video_errors.append({"path": str(path), "error": f"{type(exc).__name__}: {exc}"})
         else:
+            # GPU physics/rendering replays need not reproduce the sampled
+            # episode. Name and report the actual recorded outcome.
+            recorded = replay[env_idx]
+            actual_path = args.output.with_name(
+                f"{args.output.name}-{Path(checkpoint).stem}-{start}-"
+                f"{recorded['outcome']}-{cm}cm-seed{seed}-env{env_idx}.mp4"
+            )
+            path.rename(actual_path)
+            path = actual_path
             videos.append(str(path))
+            video_results.append({"path": str(path), "selected_from": label,
+                                  "episode": recorded})
     result = {"summary": summary, "advancement_gates": advancement_gates(rows, args.checkpoints, args.seeds),
-              "representative_videos": videos, "video_errors": video_errors}
+              "representative_videos": videos, "video_results": video_results,
+              "video_errors": video_errors}
     args.output.with_suffix(".json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2))
     print(f"Per-episode records: {args.output.with_suffix('.csv')}")
