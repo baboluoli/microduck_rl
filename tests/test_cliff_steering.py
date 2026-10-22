@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from mjlab_microduck.tasks import mdp
+from mjlab_microduck.tasks.cliff import mdp
 
 spec = importlib.util.spec_from_file_location(
     "prepare_steering", Path(__file__).parents[1] / "scripts/prepare_cliff_steering_checkpoint.py"

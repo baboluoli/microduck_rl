@@ -4,8 +4,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from mjlab_microduck.tasks import mdp
-from mjlab_microduck.tasks.microduck_cliff_drop_env_cfg import (
+from mjlab_microduck.tasks.cliff import mdp
+from mjlab_microduck.tasks.cliff.env_cfg import (
     EDGE_DISTANCE, make_microduck_cliff_drop_env_cfg, make_microduck_cliff_oracle_env_cfg,
 )
 

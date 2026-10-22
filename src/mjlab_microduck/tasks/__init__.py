@@ -67,7 +67,7 @@ from .microduck_hole_descent_env_cfg import (
     make_microduck_hole_descent_env_cfg,
     MicroduckHoleDescentRlCfg,
 )
-from .microduck_cliff_drop_env_cfg import (
+from .cliff.env_cfg import (
     make_microduck_cliff_drop_env_cfg,
     MicroduckCliffDropRlCfg,
     make_microduck_cliff_oracle_env_cfg,

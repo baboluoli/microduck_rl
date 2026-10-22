@@ -27,8 +27,10 @@ Never launch a long run without one.
 
 ## Repo map
 
-- `src/mjlab_microduck/tasks/mdp.py` — ALL custom MDP functions (rewards, events,
-  observations, commands, curricula). Add new functions here, grouped by task.
+- `src/mjlab_microduck/tasks/mdp.py` — shared MDP functions (rewards, events,
+  observations, commands, curricula) and legacy task functions.
+- `src/mjlab_microduck/tasks/cliff/` — cliff-specific `env_cfg.py`, `mdp.py`,
+  and `terrain.py`; keep cliff behavior here.
 - `src/mjlab_microduck/tasks/microduck_*_env_cfg.py` — one cfg module per task
   family. `microduck_velocity_env_cfg.py` is the main walking recipe AND the
   shared base (robot, DR, obs, commands) other envs build on or mirror.

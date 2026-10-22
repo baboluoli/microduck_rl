@@ -27,7 +27,7 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.terrains import TerrainEntityCfg
 from mjlab.utils.torch import configure_torch_backends
 
-from mjlab_microduck.tasks.microduck_cliff_drop_env_cfg import EDGE_DISTANCE, HEIGHT_BUCKETS_CM
+from mjlab_microduck.tasks.cliff.env_cfg import EDGE_DISTANCE, HEIGHT_BUCKETS_CM
 from mjlab_microduck.tasks import mdp as microduck_mdp
 
 TASK = "Mjlab-CliffDrop-Flat-MicroDuck"

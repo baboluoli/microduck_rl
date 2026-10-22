@@ -2,8 +2,8 @@
 
 import pytest
 
-from mjlab_microduck.tasks.cliff_terrain import CliffDropTerrainCfg
-from mjlab_microduck.tasks.microduck_cliff_drop_env_cfg import (
+from mjlab_microduck.tasks.cliff.terrain import CliffDropTerrainCfg
+from mjlab_microduck.tasks.cliff.env_cfg import (
     HEIGHT_BUCKETS_CM,
     make_microduck_cliff_drop_env_cfg,
 )
@@ -65,7 +65,7 @@ def test_invalid_cliff_profile(monkeypatch):
 
 
 def test_steering_profile_keeps_interface_and_ends_disqualified_attempts(monkeypatch):
-    from mjlab_microduck.tasks import mdp
+    from mjlab_microduck.tasks.cliff import mdp
 
     monkeypatch.setenv("MICRODUCK_CLIFF_PROFILE", "steering")
     cfg = make_microduck_cliff_drop_env_cfg()
