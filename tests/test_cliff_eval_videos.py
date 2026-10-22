@@ -40,3 +40,16 @@ def test_video_reports_actual_replay_outcome(monkeypatch, tmp_path):
     assert "-before_edge-" in recorded["path"]
     assert Path(recorded["path"]).exists()
     assert not list(tmp_path.glob("*-success-*.mp4"))
+
+
+def test_oracle_evaluator_keeps_geometry_truthful():
+    import pytest
+    task = "Mjlab-CliffOracle-Flat-MicroDuck"
+    cfg = eval_cliff_drop._configure(4, 0, .02, .35, "upper", task=task)
+    assert "cliff_terrain" in cfg.observations["actor"].terms
+    assert cfg.events["reset_base"].params["pose_range"]["x"] == (.55 - .35,) * 2
+    assert cfg.scene.terrain.terrain_generator.sub_terrains["cliff_drop"].min_drop == .02
+    with pytest.raises(ValueError, match="fixed 2 cm"):
+        eval_cliff_drop._configure(4, 0, .04, .35, "upper", task=task)
+    with pytest.raises(ValueError, match="fixed 2 cm"):
+        eval_cliff_drop._configure(4, 0, .02, .35, "upper", task=task, flat_ground=True)

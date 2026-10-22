@@ -4,7 +4,7 @@ from copy import deepcopy
 import os
 
 from mjlab.envs import ManagerBasedRlEnvCfg
-from mjlab.managers import EventTermCfg, RewardTermCfg, TerminationTermCfg
+from mjlab.managers import EventTermCfg, ObservationTermCfg, RewardTermCfg, TerminationTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.rl import RslRlOnPolicyRunnerCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
@@ -70,13 +70,15 @@ def _max_height_bucket() -> int:
     return HEIGHT_BUCKETS_CM.index(value)
 
 
-def make_microduck_cliff_drop_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+def make_microduck_cliff_drop_env_cfg(play: bool = False, *, profile: str | None = None,
+                                      fixed_drop: float | None = None) -> ManagerBasedRlEnvCfg:
     """Build a fall-and-landing task with the deployed 61→14 policy interface."""
     cfg = make_microduck_velocity_env_cfg(play=play, rough=False)
     cfg.scene.entities = {"robot": MICRODUCK_ALLCOLLISIONS_ROBOT_CFG}
     cfg.episode_length_s = 10.0
 
-    max_bucket = len(HEIGHT_BUCKETS_CM) - 1 if play else _max_height_bucket()
+    max_bucket = (0 if fixed_drop is not None else
+                  len(HEIGHT_BUCKETS_CM) - 1 if play else _max_height_bucket())
     cfg.scene.terrain = TerrainEntityCfg(
         terrain_type="generator",
         terrain_generator=TerrainGeneratorCfg(
@@ -91,8 +93,8 @@ def make_microduck_cliff_drop_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
                     proportion=1.0,
                     edge_x=EDGE_X,
                     spawn_x=SPAWN_X,
-                    min_drop=DROP_HEIGHT_RANGE[0],
-                    max_drop=DROP_HEIGHT_RANGE[1],
+                    min_drop=fixed_drop if fixed_drop is not None else DROP_HEIGHT_RANGE[0],
+                    max_drop=fixed_drop if fixed_drop is not None else DROP_HEIGHT_RANGE[1],
                 ),
             },
             add_lights=False,
@@ -248,7 +250,7 @@ def make_microduck_cliff_drop_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
         params=completion_params,
     )
     cfg.curriculum.pop("terrain_levels", None)
-    profile = os.environ.get("MICRODUCK_CLIFF_PROFILE", "heading")
+    profile = profile if profile is not None else os.environ.get("MICRODUCK_CLIFF_PROFILE", "heading")
     if profile in ("model999", "steering"):
         _freeze_model999_conditions(cfg)
         if profile == "steering":
@@ -278,3 +280,36 @@ MicroduckCliffDropRlCfg: RslRlOnPolicyRunnerCfg = deepcopy(MicroduckRlCfg)
 MicroduckCliffDropRlCfg.experiment_name = "cliff_drop"
 MicroduckCliffDropRlCfg.run_name = "cliff_drop"
 MicroduckCliffDropRlCfg.max_iterations = 10_000
+
+
+# Experimental oracle interface: deliberately separate from deployed 61D policies.
+ORACLE_DROP_HEIGHT = 0.02
+
+
+def make_microduck_cliff_oracle_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+    """Fixed 2 cm, upper-start descent with exact terrain inputs (63→14).
+
+    Appends [signed world-X edge distance, positive drop height], in metres,
+    to both observation groups. This is a simulation-only interface; it needs
+    a matching terrain estimator before any hardware deployment.
+    """
+    cfg = make_microduck_cliff_drop_env_cfg(
+        play=play, profile="steering", fixed_drop=ORACLE_DROP_HEIGHT,
+    )
+    cfg.scene.terrain.terrain_generator.curriculum = False
+    for group in ("actor", "critic"):
+        cfg.observations[group].terms["cliff_terrain"] = ObservationTermCfg(
+            func=microduck_mdp.cliff_terrain_observation,
+            params={"edge_distance": EDGE_DISTANCE, "drop_height": ORACLE_DROP_HEIGHT},
+        )
+    cfg.events["cliff_midair_reset"].params["probability"] = 0.0
+    cfg.terminations.pop("out_of_terrain_bounds", None)
+    return cfg
+
+
+MicroduckCliffOracleRlCfg = deepcopy(MicroduckCliffDropRlCfg)
+MicroduckCliffOracleRlCfg.experiment_name = "cliff_oracle_2cm"
+MicroduckCliffOracleRlCfg.run_name = "cliff_oracle_2cm"
+
+# The deployed symmetry map covers 61 inputs, so disable it for this interface.
+MicroduckCliffOracleRlCfg.algorithm.symmetry_cfg = None

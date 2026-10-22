@@ -69,8 +69,10 @@ def _probe(env):
 
 
 def _configure(num_envs, seed, drop_m, approach_m, start, video_env=None,
-               legacy_command=False, flat_ground=False):
-    cfg = load_env_cfg(TASK, play=True)
+               legacy_command=False, flat_ground=False, task=TASK):
+    cfg = load_env_cfg(task, play=True)
+    if task == "Mjlab-CliffOracle-Flat-MicroDuck" and (drop_m != 0.02 or flat_ground):
+        raise ValueError("CliffOracle evaluation requires the fixed 2 cm cliff")
     cfg.seed = seed
     cfg.scene.num_envs = num_envs
     if video_env is not None:
@@ -136,18 +138,18 @@ def _is_lower_contact(snapshot, i, origin, drop_m):
 def evaluate(checkpoint: Path, *, num_envs: int, seed: int, device: str, drop_m: float,
              approach_m: float, start: str = "upper", video_env: int | None = None,
              video_path: Path | None = None, legacy_command: bool = False,
-             flat_ground: bool = False):
+             flat_ground: bool = False, task: str = TASK):
     if not checkpoint.is_file():
         raise FileNotFoundError(checkpoint)
     cfg = _configure(num_envs, seed, drop_m, approach_m, start, video_env, legacy_command,
-                     flat_ground)
-    agent_cfg = load_rl_cfg(TASK)
+                     flat_ground, task)
+    agent_cfg = load_rl_cfg(task)
     env = ManagerBasedRlEnv(cfg=cfg, device=device,
                             render_mode="rgb_array" if video_env is not None else None)
     writer = None
     try:
         wrapped = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
-        runner_cls = load_runner_cls(TASK) or OnPolicyRunner
+        runner_cls = load_runner_cls(task) or OnPolicyRunner
         runner = runner_cls(wrapped, asdict(agent_cfg), device=device)
         runner.load(str(checkpoint), map_location=device)
         policy = runner.get_inference_policy(device=device)
@@ -335,6 +337,7 @@ def advancement_gates(rows, checkpoints, seeds):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("checkpoints", nargs="+", type=Path)
+    parser.add_argument("--task", choices=[TASK, "Mjlab-CliffOracle-Flat-MicroDuck"], default=TASK)
     parser.add_argument("--num-envs", type=int, default=16)
     parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
     parser.add_argument("--approach-distances", type=float, nargs="+", default=[0.35, 0.55, 0.75])
@@ -350,6 +353,8 @@ def main():
         parser.error("num-envs must be positive and approach distances must start on the upper platform")
     if any(h not in HEIGHT_BUCKETS_CM for h in args.heights_cm):
         parser.error(f"heights must be among {HEIGHT_BUCKETS_CM}")
+    if args.task == "Mjlab-CliffOracle-Flat-MicroDuck" and args.heights_cm != [2]:
+        parser.error("CliffOracle requires --heights-cm 2")
     configure_torch_backends()
     import mjlab.tasks  # noqa: F401 - load task plugins
 
@@ -363,7 +368,7 @@ def main():
                         group = evaluate(checkpoint, num_envs=args.num_envs, seed=seed,
                                          device=args.device, drop_m=cm / 100,
                                          approach_m=distance, start=start,
-                                         legacy_command=args.legacy_command)
+                                         legacy_command=args.legacy_command, task=args.task)
                         rows.extend(group)
                         if args.no_videos:
                             continue
@@ -387,7 +392,7 @@ def main():
             replay = evaluate(Path(checkpoint), num_envs=args.num_envs, seed=seed, device=args.device,
                               drop_m=cm / 100, approach_m=distance, start=start,
                               video_env=env_idx, video_path=path,
-                              legacy_command=args.legacy_command)
+                              legacy_command=args.legacy_command, task=args.task)
         except Exception as exc:
             video_errors.append({"path": str(path), "error": f"{type(exc).__name__}: {exc}"})
         else:
@@ -403,7 +408,7 @@ def main():
             videos.append(str(path))
             video_results.append({"path": str(path), "selected_from": label,
                                   "episode": recorded})
-    result = {"summary": summary, "advancement_gates": advancement_gates(rows, args.checkpoints, args.seeds),
+    result = {"task": args.task, "summary": summary, "advancement_gates": advancement_gates(rows, args.checkpoints, args.seeds),
               "representative_videos": videos, "video_results": video_results,
               "video_errors": video_errors}
     args.output.with_suffix(".json").write_text(json.dumps(result, indent=2) + "\n")

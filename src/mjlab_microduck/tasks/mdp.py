@@ -3680,6 +3680,24 @@ def terrain_levels_slope(env: ManagerBasedRlEnv, env_ids: torch.Tensor) -> torch
 
 
 # ── Cliff drop: reach the lower floor, land on the feet, keep walking ────────
+def cliff_terrain_observation(
+    env: ManagerBasedRlEnv,
+    edge_distance: float,
+    drop_height: float,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Exact fixed-cliff geometry in metres, independent of robot height/yaw.
+
+    Distance is positive before the edge and negative after crossing it.
+    env_origins includes the terrain tile's spawn offset. Drop height is the
+    known fixed terrain parameter, not the robot's changing elevation.
+    """
+    asset: Entity = env.scene[asset_cfg.name]
+    local_x = asset.data.root_link_pos_w[:, 0] - env.scene.env_origins[:, 0]
+    distance = edge_distance - local_x
+    return torch.stack((distance, torch.full_like(distance, drop_height)), dim=-1)
+
+
 def cliff_forward_progress(
     env: ManagerBasedRlEnv,
     command_name: str = "twist",
