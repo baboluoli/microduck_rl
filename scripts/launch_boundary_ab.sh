@@ -80,6 +80,8 @@ tar --no-same-owner -xzf /workspace/boundary-ab-source.tar.gz -C /workspace/rl
 apt-get update -q
 apt-get install -y -q --no-install-recommends libegl1 libgles2 libgl1 libglx-mesa0 libglib2.0-0
 if ! command -v uv >/dev/null; then curl -LsSf https://astral.sh/uv/install.sh | sh; fi
+# No .git on the pod: evaluation manifests read the uploaded commit from here.
+export MICRODUCK_GIT_HEAD="\$(cat sources/COMMIT)"
 export PATH="/root/.local/bin:\$PATH" MUJOCO_GL=egl PYOPENGL_PLATFORM=egl WANDB_MODE=offline PYTHONUNBUFFERED=1
 uv sync --frozen
 uv run python - <<'PREFLIGHT'

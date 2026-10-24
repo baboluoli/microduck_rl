@@ -6,6 +6,7 @@ import argparse
 from dataclasses import asdict
 import hashlib
 import json
+import os
 from pathlib import Path
 import platform
 import numpy as np
@@ -158,7 +159,8 @@ if __name__ == '__main__':
         heights=args.heights, distances=args.distances, seeds=args.seeds, attempts_per_seed=24,
         height_bank=course.HEIGHTS, resolution_m=.0005, finish_x=course.FINISH, forward_edge=course.FORWARD_EDGE,
         python=platform.python_version(),torch=torch.__version__,
-        git_head=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
+        # Pods receive a tarball without .git; the launcher passes the commit instead.
+        git_head=os.environ.get('MICRODUCK_GIT_HEAD') or subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
         sources={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in sources})
     (args.output/'manifest.json').write_text(json.dumps(manifest,indent=2))
     for height in args.heights:
