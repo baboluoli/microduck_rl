@@ -1,5 +1,10 @@
 # Cliff steering repair: prepared experiment
 
+> Historical pilot recipe: the checkpoint-999 schedule freeze has been removed.
+> Current profiles use the shared cliff posture, smoothing, and CoM settings;
+> The `model999` profile has also been removed. Commands below using it are historical
+> and no longer supported; results below used the old settings.
+
 Status: completed; [results](cliff-steering-pilot-report.md). The approved GPU
 pilot ran on replacement A40 pod `kswm9yejyj537g`, now stopped.
 The original stopped pod could not restart because its host had no free GPU.

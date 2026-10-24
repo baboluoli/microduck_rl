@@ -39,27 +39,9 @@ def test_bucket_definition_matches_training_rows():
     assert terrain.height_buckets == tuple(x / 100 for x in HEIGHT_BUCKETS_CM)
 
 
-def test_model999_profile_preserves_pre_boundary_conditions(monkeypatch):
-    monkeypatch.setenv("MICRODUCK_CLIFF_PROFILE", "model999")
-    monkeypatch.setenv("MICRODUCK_CLIFF_MAX_HEIGHT_CM", "2")
-    cfg = make_microduck_cliff_drop_env_cfg()
-    twist = cfg.commands["twist"]
-    assert not twist.heading_command
-    assert twist.rel_heading_envs == 0.0
-    assert twist.ranges.ang_vel_z == (0.0, 0.0)
-    assert cfg.rewards["action_rate_l2"].weight == -0.4
-    assert cfg.rewards["head_pose_bias"].weight == 1.0
-    assert cfg.commands["head_pose"].ranges == (
-        (-0.17, 0.17), (-0.17, 0.17), (-0.21, 0.21), (-0.047, 0.047)
-    )
-    assert cfg.events["randomize_com"].params["ranges"] == (-0.005, 0.005)
-    assert cfg.events["randomize_head_com"].params["ranges"] == (-0.005, 0.005)
-    assert cfg.curriculum == {}
-    assert cfg.scene.terrain.max_init_terrain_level == 0
-
-
-def test_invalid_cliff_profile(monkeypatch):
-    monkeypatch.setenv("MICRODUCK_CLIFF_PROFILE", "unknown")
+@pytest.mark.parametrize("profile", ["unknown", "model999"])
+def test_invalid_cliff_profile(monkeypatch, profile):
+    monkeypatch.setenv("MICRODUCK_CLIFF_PROFILE", profile)
     with pytest.raises(ValueError, match="MICRODUCK_CLIFF_PROFILE"):
         make_microduck_cliff_drop_env_cfg()
 
@@ -71,6 +53,10 @@ def test_steering_profile_keeps_interface_and_ends_disqualified_attempts(monkeyp
     cfg = make_microduck_cliff_drop_env_cfg()
     assert cfg.commands["twist"].heading_command
     assert cfg.commands["twist"].ranges.ang_vel_z == (-0.3, 0.3)
+    assert cfg.rewards["action_rate_l2"].weight == -0.1
+    assert cfg.rewards["head_pose_bias"].weight == 0.0
+    assert cfg.events["randomize_com"].params["ranges"] == (-0.003, 0.003)
+    assert cfg.events["randomize_head_com"].params["ranges"] == (-0.003, 0.003)
     assert cfg.events["cliff_midair_reset"].params["probability"] == 0
     assert cfg.rewards["track_linear_velocity"].func is mdp.cliff_forward_progress
     assert cfg.terminations["cliff_failed_landing"].func is mdp.cliff_failed_landing

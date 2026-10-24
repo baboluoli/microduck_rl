@@ -1,5 +1,10 @@
 # Cliff drop: staged experiment
 
+> Historical pilot recipe: the checkpoint-999 schedule freeze has been removed.
+> Current profiles use the shared cliff posture, smoothing, and CoM settings;
+> The `model999` profile has also been removed. Commands below using it are historical
+> and no longer supported; results below used the old settings.
+
 ## Latest pilot: steering repair (completed)
 
 The zero-yaw continuation below was stopped after 200 updates for regression.

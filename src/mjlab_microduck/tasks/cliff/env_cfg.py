@@ -34,114 +34,101 @@ DROP_HEIGHT_RANGE = (0.02, 0.10)
 HEIGHT_BUCKETS_CM = (2, 4, 6, 8, 10)
 
 
-def _freeze_model999_conditions(cfg: ManagerBasedRlEnvCfg) -> None:
-    """Hold the original schedules immediately before the 1000-update boundary.
-
-    Checkpoint 999 stores counter 24000. Pose schedules use >= while reward
-    and CoM schedules use >, so that boundary is ambiguous for the last reset.
-    Use the last unambiguous stage (23999), avoiding the old continuation's
-    simultaneous increase in posture, CoM and smoothing demands.
-    """
-    source = make_microduck_velocity_env_cfg(play=False, rough=False)
-    for name in ("action_rate_weight", "head_pose_bias_weight"):
-        params = source.curriculum[name].params
-        stage = next(s for s in reversed(params["weight_stages"]) if s["step"] < 24000)
-        cfg.rewards[params["reward_name"]].weight = stage["weight"]
-    for name in ("head_pose_range", "body_pose_range"):
-        params = source.curriculum[name].params
-        stage = next(s for s in reversed(params["range_stages"]) if s["step"] < 24000)
-        cfg.commands[params["command_name"]].ranges = tuple(stage["ranges"])
-    for name in ("com_range", "head_com_range"):
-        if name in source.curriculum:
-            params = source.curriculum[name].params
-            stage = next(s for s in reversed(params["range_stages"]) if s["step"] < 24000)
-            cfg.events[params["event_name"]].params["ranges"] = (-stage["range"], stage["range"])
-    twist = cfg.commands["twist"]
-    twist.heading_command = False
-    twist.rel_heading_envs = 0.0
-    twist.ranges.heading = None
-    twist.ranges.ang_vel_z = (0.0, 0.0)
-
-
 def _max_height_bucket() -> int:
     """Training stage is advanced externally only after paired evaluation gates."""
+    # Read the maximum allowed training height in centimetres; default to the easiest drop.
     value = int(os.environ.get("MICRODUCK_CLIFF_MAX_HEIGHT_CM", "2"))
-    if value not in HEIGHT_BUCKETS_CM:
+    if value not in HEIGHT_BUCKETS_CM:  # Reject heights that do not correspond to one of the generated terrain rows.
         raise ValueError(f"MICRODUCK_CLIFF_MAX_HEIGHT_CM must be one of {HEIGHT_BUCKETS_CM}")
-    return HEIGHT_BUCKETS_CM.index(value)
+    return HEIGHT_BUCKETS_CM.index(value)  # Convert the height to a zero-based row index: 2 cm becomes 0, 4 cm becomes 1, etc.
 
 
-def make_microduck_cliff_drop_env_cfg(play: bool = False, *, profile: str | None = None,
-                                      fixed_drop: float | None = None) -> ManagerBasedRlEnvCfg:
+def make_microduck_cliff_drop_env_cfg(
+    # Build settings for policy playback; this allows starts across all height rows and uses fewer env variants.
+    play: bool = False,
+    *,
+    profile: str | None = None,  # Select the heading or steering command setup.
+    fixed_drop: float | None = None,  # Force one drop height for fixed-height experiments or evaluation.
+) -> ManagerBasedRlEnvCfg:
     """Build a fall-and-landing task with the deployed 61→14 policy interface."""
+    # Start with the walking task: keep its actuators, observations, actions, and randomization.
     cfg = make_microduck_velocity_env_cfg(play=play, rough=False)
+    # Use collision geometry on all robot parts so head, trunk, and servo impacts are simulated.
     cfg.scene.entities = {"robot": MICRODUCK_ALLCOLLISIONS_ROBOT_CFG}
-    cfg.episode_length_s = 10.0
+    cfg.episode_length_s = 10.0  # End each episode after ten simulated seconds if it has not ended earlier.
 
+    # Limit initial training assignments to the selected height bucket; fixed-height runs use row zero.
     max_bucket = (0 if fixed_drop is not None else
                   len(HEIGHT_BUCKETS_CM) - 1 if play else _max_height_bucket())
     cfg.scene.terrain = TerrainEntityCfg(
-        terrain_type="generator",
+        terrain_type="generator",  # Build terrain from the procedural generator below.
         terrain_generator=TerrainGeneratorCfg(
-            size=(5.0, 3.0),
-            border_width=20.0,
-            curriculum=True,
-            num_rows=len(HEIGHT_BUCKETS_CM),
+            size=(5.0, 3.0),  # Make each generated terrain tile five metres along X and three metres along Y.
+            border_width=20.0,  # Add a 20-metre-wide border around the terrain grid.
+            curriculum=True,  # Order rows by increasing cliff height; this does not automatically advance training.
+            num_rows=len(HEIGHT_BUCKETS_CM),  # Set five grid rows along X, one per drop height: 2, 4, 6, 8, and 10 cm.
+            # Request grid columns along Y; mjlab uses one here because there is one terrain type and curriculum is on.
             num_cols=20 if not play else 5,
+            # Set the difficulty values used to build successive grid rows; the cliff generator maps them to drop heights.
             difficulty_range=(0.0, 1.0),
             sub_terrains={
                 "cliff_drop": CliffDropTerrainCfg(
-                    proportion=1.0,
-                    edge_x=EDGE_X,
-                    spawn_x=SPAWN_X,
+                    proportion=1.0,  # Give this cliff terrain all spawn probability; it is the only terrain type configured here.
+                    edge_x=EDGE_X,  # Place the cliff edge at this X coordinate in the patch.
+                    spawn_x=SPAWN_X,  # Place the robot's spawn point at this X coordinate.
+                    # Set the lower drop bound, or the fixed experimental height.
                     min_drop=fixed_drop if fixed_drop is not None else DROP_HEIGHT_RANGE[0],
-                    max_drop=fixed_drop if fixed_drop is not None else DROP_HEIGHT_RANGE[1],
+                    max_drop=fixed_drop if fixed_drop is not None else DROP_HEIGHT_RANGE[1],  # Set the upper drop bound, or the same fixed height.
                 ),
             },
-            add_lights=False,
+            add_lights=False,  # Do not add a directional light above the terrain grid.
         ),
-        max_init_terrain_level=max_bucket,
+        max_init_terrain_level=max_bucket,  # Allow initial placement only on rows 0 through this height-stage index.
     )
-    cfg.scene.spec_fn = _soften_terrain_contacts
-    cfg.sim.nconmax = 200
-    cfg.sim.mujoco.iterations = 30
-    cfg.sim.mujoco.ls_iterations = 50
+    cfg.scene.spec_fn = _soften_terrain_contacts  # Apply the project's softer contact settings to generated terrain.
+    cfg.sim.nconmax = 200  # Reserve capacity for up to 200 collision contact points in one simulation step.
+    cfg.sim.mujoco.iterations = 30  # Repeat physics calculations up to 30 times per step to resolve motion and collisions.
+    cfg.sim.mujoco.ls_iterations = 50  # Allow up to 50 extra search calculations per step to improve the physics solution.
 
     # Keep the inherited twist slot semantics: yaw-rate command, corrected
     # toward world +X by mjlab's proportional heading controller.
     twist = cfg.commands["twist"]
-    twist.rel_standing_envs = 0.0
-    twist.rel_heading_envs = 1.0
-    twist.heading_command = True
-    twist.ranges.heading = (0.0, 0.0)
-    twist.heading_control_stiffness = 2.0
-    twist.rel_turn_in_place_envs = 0.0
-    twist.ranges.lin_vel_x = (0.18, 0.24)
-    twist.ranges.lin_vel_y = (0.0, 0.0)
-    twist.ranges.ang_vel_z = (-0.6, 0.6)
-    twist.init_velocity_prob = 0.0
-    cfg.curriculum.pop("standing_envs", None)
+    # Expand twist so it hardcodes forward motion to walk towards the cliff.
+    twist.rel_standing_envs = 0.0  # Do not assign any robots a standing-only command.
+    twist.rel_heading_envs = 1.0  # Give every robot a target heading instead of an independently sampled yaw rate.
+    twist.heading_command = True  # Convert heading error into a requested turning speed.
+    twist.ranges.heading = (0.0, 0.0)  # Aim along world +X, which is the direction toward and beyond the cliff.
+    twist.heading_control_stiffness = 2.0  # Use proportional heading correction: larger values request stronger turns for the same error.
+    twist.rel_turn_in_place_envs = 0.0  # Do not allocate episodes to turning on the spot.
+    twist.ranges.lin_vel_x = (0.18, 0.24)  # Sample forward walking targets between 0.18 and 0.24 metres per second.
+    twist.ranges.lin_vel_y = (0.0, 0.0)  # Request no sideways walking.
+    twist.ranges.ang_vel_z = (-0.6, 0.6)  # Limit heading-controller turning commands to this range in radians per second.
+    twist.init_velocity_prob = 0.0  # Disable the command generator's optional initial-velocity injection.
+
+    # Remove some existing values from the regular Tinyduck config for changing up some walking parameters with time that we don't need.
+
+    cfg.curriculum.pop("standing_envs", None)  # Remove the inherited schedule that would change the fraction of standing commands.
     # Freeze inherited schedules at their easy starting values. Advancing the
     # height stage must not silently widen posture/CoM or smoothing demands.
     for name in ("head_pose_range", "body_pose_range", "com_range",
                  "head_com_range", "action_rate_weight", "head_pose_bias_weight"):
         cfg.curriculum.pop(name, None)
-    cfg.rewards["action_rate_l2"].weight = -0.1
-    cfg.rewards["head_pose_bias"].weight = 0.0
-    pose = cfg.events["reset_base"].params["pose_range"]
-    pose["x"] = (0.0, 0.0)
-    pose["y"] = (0.0, 0.0)
-    pose["yaw"] = (0.0, 0.0)
-    cfg.events.pop("push_robot", None)
-    for name in ("randomize_com", "randomize_head_com"):
+    cfg.rewards["action_rate_l2"].weight = -0.1  # Penalize abrupt changes between consecutive actions to discourage jitter.
+    cfg.rewards["head_pose_bias"].weight = 0.0  # Disable the inherited head-pose bias reward for this task.
+    pose = cfg.events["reset_base"].params["pose_range"]  # Edit the existing base-reset ranges; other inherited reset settings remain active.
+    pose["x"] = (0.0, 0.0)  # Keep the reset position at the tile spawn rather than adding random X offsets.
+    pose["y"] = (0.0, 0.0)  # Keep the robot centered across the tile.
+    pose["yaw"] = (0.0, 0.0)  # Start facing +X without random yaw offsets.
+    cfg.events.pop("push_robot", None)  # Remove random external pushes so the cliff is the main balance disturbance.
+    for name in ("randomize_com", "randomize_head_com"):  # Keep body and head centre-of-mass uncertainty small: offsets within +/-3 mm.
         if name in cfg.events:
             cfg.events[name].params["ranges"] = (-0.003, 0.003)
-    cfg.events["cliff_midair_reset"] = EventTermCfg(
+    cfg.events["cliff_midair_reset"] = EventTermCfg(  # Start some training episodes already in flight so landing receives experience early.
         func=cliff_mdp.cliff_midair_reset,
         mode="reset",
         params={
-            "edge_distance": EDGE_DISTANCE,
-            "probability": 0.35 if not play else 0.0,
+            "edge_distance": EDGE_DISTANCE,  # Locate the edge 0.55 metres ahead of the normal spawn.
+            "probability": 0.35 if not play else 0.0,  # Use midair starts for 35% of training resets and none during playback.
         },
     )
 
@@ -150,70 +137,77 @@ def make_microduck_cliff_drop_env_cfg(play: bool = False, *, profile: str | None
     cfg.terminations.pop("fell_over", None)
     cfg.terminations["fallen_too_long"] = TerminationTermCfg(
         func=microduck_mdp.fallen_too_long,
-        time_out=False,
+        time_out=False,  # Treat this as a terminal outcome rather than a time-limit truncation.
         # World z cannot classify a fall because the lower floor varies in z.
         params={"gate_z_below": -0.5, "gate_tilt_above_deg": 45.0, "max_duration_s": 4.0},
     )
 
+    # Detect servo housings hitting the floor and penalize.
+    # Measure terrain forces on servo housings for the servo-impact penalty.
     servo_ground = ContactSensorCfg(
         name="servo_ground_contact",
         primary=ContactMatch(mode="geom", pattern=rf"^.*{SERVO_GEOM_SUFFIX}$", entity="robot"),
-        secondary=ContactMatch(mode="body", pattern="terrain"),
+        secondary=ContactMatch(mode="body", pattern="terrain"),  # Only measure contacts against terrain, excluding robot self-contact.
         fields=("force",),
-        reduce="netforce",
+        reduce="netforce",  # Combine simultaneous contact forces into a net force.
         num_slots=1,
     )
+    # Detect impacts to the head and penalize.
+    # Measure head impacts for both the impact penalty and landing-success checks.
     head_ground = ContactSensorCfg(
         name="head_ground_contact",
         primary=ContactMatch(mode="body", pattern=rf"^({'|'.join(HEAD_BODY_NAMES)})$", entity="robot"),
-        secondary=ContactMatch(mode="body", pattern="terrain"),
+        secondary=ContactMatch(mode="body", pattern="terrain"),  # Only measure contacts against terrain, excluding robot self-contact.
         fields=("force",),
-        reduce="netforce",
+        reduce="netforce",  # Combine simultaneous contact forces into a net force.
         num_slots=1,
     )
+    # Detect impacts to the trunk and penalize.
+    # Measure trunk impacts for both the impact penalty and landing-success checks.
     trunk_ground = ContactSensorCfg(
         name="trunk_ground_contact",
         primary=ContactMatch(mode="body", pattern="^trunk_base$", entity="robot"),
-        secondary=ContactMatch(mode="body", pattern="terrain"),
+        secondary=ContactMatch(mode="body", pattern="terrain"),  # Only measure contacts against terrain, excluding robot self-contact.
         fields=("force",),
-        reduce="netforce",
+        reduce="netforce",  # Combine simultaneous contact forces into a net force.
         num_slots=1,
     )
+    # Record foot contact positions and forces in addition to the inherited foot sensor.
     lower_contact = ContactSensorCfg(
         name="cliff_foot_contact",
         primary=ContactMatch(
             mode="geom", pattern=r"^(left_foot_collision|right_foot_collision)$", entity="robot"
         ),
-        secondary=ContactMatch(mode="body", pattern="terrain"),
+        secondary=ContactMatch(mode="body", pattern="terrain"),  # Only measure contacts against terrain, excluding robot self-contact.
         fields=("found", "pos", "force"),
-        reduce="maxforce",
+        reduce="maxforce",  # Keep the strongest foot contact rather than summing separate contacts.
         num_slots=1,
     )
+    # Append these sensors while preserving the walking task's existing sensors.
     cfg.scene.sensors = tuple(cfg.scene.sensors) + (servo_ground, head_ground, trunk_ground, lower_contact)
-    cfg.terminations["nan_state"].params["sensor_names"] = (
+    cfg.terminations["nan_state"].params["sensor_names"] = (  # Include the added sensors in the guard that resets invalid numerical states.
         "feet_ground_contact", servo_ground.name, head_ground.name, trunk_ground.name,
         lower_contact.name,
     )
 
-    # Keep the walk incentives, but allow a landing and charge hard impacts.
-    cfg.rewards["air_time"] = RewardTermCfg(
+    # Inherited from parent cfg.
+    cfg.rewards["air_time"] = RewardTermCfg(  # Keep the walking air-time reward, but suppress it when tilt exceeds 40 degrees.
         func=microduck_mdp.feet_air_time_upright,
         weight=cfg.rewards["air_time"].weight,
         params={**cfg.rewards["air_time"].params, "gate_tilt_above_deg": 40.0},
     )
-    cfg.rewards["head_pose_bias"].params.update({
-        # World height changes with the drop; use tilt to gate this term.
-        "gate_height_low": -0.20,
+    cfg.rewards["head_pose_bias"].params.update({  # Configure the head-pose gate even though its reward weight is currently zero.
+        "gate_height_low": -0.20,  # World height changes with the drop; use tilt to gate this term.
         "gate_height_high": -0.15,
         "gate_tilt_full_deg": 20.0,
         "gate_tilt_zero_deg": 40.0,
     })
-    cfg.rewards["upright_progress"] = RewardTermCfg(
+    cfg.rewards["upright_progress"] = RewardTermCfg(  # Reward becoming more upright and penalize tipping further; holding a pose earns zero.
         func=microduck_mdp.upright_progress,
         weight=5.0,
         params={"asset_cfg": SceneEntityCfg("robot", body_names=("trunk_base",))},
     )
-    for name, sensor, threshold, weight in (
+    for name, sensor, threshold, weight in (  # Charge for contact forces above these thresholds in newtons; negative weights make costs.
         ("servo_impact", servo_ground.name, 2.0, -0.02),
         ("head_impact", head_ground.name, 15.0, -0.01),
         ("trunk_impact", trunk_ground.name, 20.0, -0.01),
@@ -223,58 +217,64 @@ def make_microduck_cliff_drop_env_cfg(play: bool = False, *, profile: str | None
             weight=weight,
             params={"sensor_name": sensor, "threshold": threshold},
         )
-    cfg.rewards["servo_acc_spike"] = RewardTermCfg(
+    cfg.rewards["servo_acc_spike"] = RewardTermCfg(  # Penalize joint acceleration above 300 rad/s² to discourage harsh landing loads.
         func=microduck_mdp.servo_acc_spike_penalty,
         weight=-1e-3,
         params={"acc_thresh": 300.0},
     )
-    cfg.rewards["servo_stall"] = RewardTermCfg(
+    cfg.rewards["servo_stall"] = RewardTermCfg(  # Penalize servos exerting over 0.4 N·m while moving slower than 0.5 rad/s.
         func=microduck_mdp.servo_stall_penalty,
         weight=-0.05,
         params={"torque_thresh": 0.4, "vel_thresh": 0.5},
     )
 
-    completion_params = {
+    completion_params = {  # Share the same edge and post-edge travel distances between success reward and termination.
         "edge_distance": EDGE_DISTANCE,
-        "landing_distance": LANDING_DISTANCE,
+        "landing_distance": LANDING_DISTANCE,  # Require travel at least 0.40 metres beyond the edge before success is possible.
     }
-    cfg.rewards["cliff_landing"] = RewardTermCfg(
+    cfg.rewards["cliff_landing"] = RewardTermCfg(  # Pay a one-time bonus for a stable, feet-supported landing with continued forward motion.
         func=cliff_mdp.cliff_landing_reward,
         # Success ends the episode early, forfeiting the remaining walking
         # annuity. This bonus must exceed that opportunity cost.
         weight=80.0,
         params=completion_params,
     )
+    # Success requires 0.30 s of supported forward travel with tilt <=30 degrees,
+    # limited vertical speed, and no disqualifying head or trunk impact.
+    # End successful episodes using exactly the same condition as the landing bonus.
     cfg.terminations["cliff_landing"] = TerminationTermCfg(
         func=cliff_mdp.cliff_landing_complete,
-        time_out=False,
+        time_out=False,  # Treat this as a terminal outcome rather than a time-limit truncation.
         params=completion_params,
     )
-    cfg.curriculum.pop("terrain_levels", None)
+    cfg.curriculum.pop("terrain_levels", None)  # Disable automatic movement between height rows; the maximum training height is set externally.
+    # Prefer an explicit profile argument; otherwise read the environment variable, defaulting to heading.
     profile = profile if profile is not None else os.environ.get("MICRODUCK_CLIFF_PROFILE", "heading")
-    if profile in ("model999", "steering"):
-        _freeze_model999_conditions(cfg)
-        if profile == "steering":
-            # Requires prepare_cliff_steering_checkpoint.py for a zero-yaw
-            # source: its unused input column must not receive arbitrary new
-            # normalized values when the heading controller is enabled.
-            twist.heading_command = True
-            twist.rel_heading_envs = 1.0
-            twist.ranges.heading = (0.0, 0.0)
-            twist.heading_control_stiffness = 0.5
-            twist.ranges.ang_vel_z = (-0.3, 0.3)
-            cfg.events["cliff_midair_reset"].params["probability"] = 0.0
-            cfg.rewards["track_linear_velocity"] = RewardTermCfg(
-                func=cliff_mdp.cliff_forward_progress, weight=4.0,
-            )
-            cfg.terminations["cliff_failed_landing"] = TerminationTermCfg(
-                func=cliff_mdp.cliff_failed_landing,
-                params=dict(completion_params), time_out=False,
-            )
-            cfg.terminations["fallen_too_long"].params["max_duration_s"] = 0.5
-    elif profile != "heading":
-        raise ValueError("MICRODUCK_CLIFF_PROFILE must be heading, model999 or steering")
-    return cfg
+    if profile == "steering":
+        # Requires prepare_cliff_steering_checkpoint.py for a zero-yaw
+        # source: its unused input column must not receive arbitrary new
+        # normalized values when the heading controller is enabled.
+        twist.heading_command = True
+        twist.rel_heading_envs = 1.0
+        twist.ranges.heading = (0.0, 0.0)
+        twist.heading_control_stiffness = 0.5  # Use gentler heading correction than the default heading profile.
+        twist.ranges.ang_vel_z = (-0.3, 0.3)  # Restrict steering corrections to +/-0.3 radians per second.
+        # Train the full approach and descent instead of starting partway through the landing.
+        cfg.events["cliff_midair_reset"].params["probability"] = 0.0
+        # Replace velocity tracking with capped world-X progress, so standing still earns no forward credit.
+        cfg.rewards["track_linear_velocity"] = RewardTermCfg(
+            func=cliff_mdp.cliff_forward_progress, weight=4.0,
+        )
+        # End attempts immediately when head or trunk impacts disqualify a successful landing.
+        cfg.terminations["cliff_failed_landing"] = TerminationTermCfg(
+            func=cliff_mdp.cliff_failed_landing,
+            params=dict(completion_params), time_out=False,
+        )
+        # Shorten the recovery window to half a second for the steering profile.
+        cfg.terminations["fallen_too_long"].params["max_duration_s"] = 0.5
+    elif profile != "heading":  # The heading profile needs no overrides; reject unrecognized profile names.
+        raise ValueError("MICRODUCK_CLIFF_PROFILE must be heading or steering")
+    return cfg  # Return the configuration; simulation and training are started elsewhere.
 
 
 MicroduckCliffDropRlCfg: RslRlOnPolicyRunnerCfg = deepcopy(MicroduckRlCfg)
@@ -283,8 +283,7 @@ MicroduckCliffDropRlCfg.run_name = "cliff_drop"
 MicroduckCliffDropRlCfg.max_iterations = 10_000
 
 
-# Experimental oracle interface: deliberately separate from deployed 61D policies.
-ORACLE_DROP_HEIGHT = 0.02
+ORACLE_DROP_HEIGHT = 0.02  # Experimental oracle interface: deliberately separate from deployed 61D policies.
 
 
 def make_microduck_cliff_oracle_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
@@ -294,23 +293,24 @@ def make_microduck_cliff_oracle_env_cfg(play: bool = False) -> ManagerBasedRlEnv
     to both observation groups. This is a simulation-only interface; it needs
     a matching terrain estimator before any hardware deployment.
     """
-    cfg = make_microduck_cliff_drop_env_cfg(
+    cfg = make_microduck_cliff_drop_env_cfg(  # Reuse the steering task with every terrain tile fixed to a 2 cm drop.
         play=play, profile="steering", fixed_drop=ORACLE_DROP_HEIGHT,
     )
+    # Use the full requested grid with random allocation; all tiles still have the same fixed height.
     cfg.scene.terrain.terrain_generator.curriculum = False
-    for group in ("actor", "critic"):
+    for group in ("actor", "critic"):  # Give both the action-producing policy (actor) and value estimator (critic) the two extra inputs.
+        # Append exact signed edge distance and drop height, increasing observations from 61 to 63 values.
         cfg.observations[group].terms["cliff_terrain"] = ObservationTermCfg(
             func=cliff_mdp.cliff_terrain_observation,
             params={"edge_distance": EDGE_DISTANCE, "drop_height": ORACLE_DROP_HEIGHT},
         )
-    cfg.events["cliff_midair_reset"].params["probability"] = 0.0
-    cfg.terminations.pop("out_of_terrain_bounds", None)
-    return cfg
+    cfg.events["cliff_midair_reset"].params["probability"] = 0.0  # Always start on the upper platform so the oracle practices the entire descent.
+    cfg.terminations.pop("out_of_terrain_bounds", None)  # Remove the inherited terrain-boundary termination for this oracle experiment.
+    return cfg  # Return the configuration; simulation and training are started elsewhere.
 
 
 MicroduckCliffOracleRlCfg = deepcopy(MicroduckCliffDropRlCfg)
 MicroduckCliffOracleRlCfg.experiment_name = "cliff_oracle_2cm"
 MicroduckCliffOracleRlCfg.run_name = "cliff_oracle_2cm"
 
-# The deployed symmetry map covers 61 inputs, so disable it for this interface.
-MicroduckCliffOracleRlCfg.algorithm.symmetry_cfg = None
+MicroduckCliffOracleRlCfg.algorithm.symmetry_cfg = None  # The deployed symmetry map covers 61 inputs, so disable it for this interface.

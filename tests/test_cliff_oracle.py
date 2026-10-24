@@ -27,7 +27,7 @@ def test_oracle_geometry_tracks_motion_and_tile_origin():
 
 @pytest.mark.parametrize("play", [False, True])
 def test_oracle_fixed_geometry_and_separate_interface(monkeypatch, play):
-    monkeypatch.setenv("MICRODUCK_CLIFF_PROFILE", "model999")
+    monkeypatch.setenv("MICRODUCK_CLIFF_PROFILE", "heading")
     monkeypatch.setenv("MICRODUCK_CLIFF_MAX_HEIGHT_CM", "10")
     cfg = make_microduck_cliff_oracle_env_cfg(play=play)
     base = make_microduck_cliff_drop_env_cfg(play=play)
