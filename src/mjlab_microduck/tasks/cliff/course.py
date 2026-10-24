@@ -136,6 +136,33 @@ def boundary(env):
     return update(env).boundary.clone()
 
 
+def sideways_drift(env, tau_s=1.):
+    """Penalize slow sideways walking ("crab drift"), not the gait's natural sway.
+
+    The course rewards only world-X progress, so sideways travel used to be
+    free until the robot left the course 1.15 m off-centre. The 2026-10-24
+    telemetry showed the drift is stepping sideways while facing forward
+    (source -0.056 m/s, model_99 -0.132 m/s), not turning.
+
+    Velocity is taken in the heading frame (yaw only), so tilting during the
+    drop does not leak vertical speed into "sideways". A biped sways left and
+    right every step; a ~1 s moving average (EMA) cancels that oscillation and
+    leaves the steady drift, which is the only part the policy should pay for.
+    Self-negating (returns <= 0, in m/s): use a POSITIVE weight.
+    """
+    d = env.scene['robot'].data
+    q = d.root_link_quat_w
+    yaw = torch.atan2(2 * (q[:, 0] * q[:, 3] + q[:, 1] * q[:, 2]), 1 - 2 * (q[:, 2]**2 + q[:, 3]**2))
+    v = d.root_link_lin_vel_w
+    lateral = torch.nan_to_num(-torch.sin(yaw) * v[:, 0] + torch.cos(yaw) * v[:, 1])
+    if not hasattr(env, '_course_lateral_ema'):
+        env._course_lateral_ema = torch.zeros(env.num_envs, device=env.device)
+    ema = env._course_lateral_ema
+    ema[env.episode_length_buf <= 1] = 0  # First control step of a new episode.
+    ema += env.step_dt / tau_s * (lateral - ema)
+    return -ema.abs()
+
+
 def reward(env):
     # Success is itself a termination: masking reset_terminated would erase it.
     return 80 * update(env).pulse.float() / env.step_dt

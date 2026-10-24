@@ -223,3 +223,46 @@ def test_full_course_bank_has_no_border_overlap():
                 distance = mujoco.mj_ray(model, data, point, np.array([0., 0., -1.]),
                                          None, 1, -1, np.array([-1], dtype=np.int32))
                 assert point[2] - distance == pytest.approx(-height, abs=1e-7)
+
+
+def _drift_env(vx, vy, yaw=0., n=1):
+    from types import SimpleNamespace
+    half = torch.tensor(yaw / 2)
+    quat = torch.stack([torch.cos(half), torch.zeros(()), torch.zeros(()), torch.sin(half)]).repeat(n, 1)
+    data = SimpleNamespace(root_link_quat_w=quat, root_link_lin_vel_w=torch.tensor([[vx, vy, 0.]] * n))
+    return SimpleNamespace(scene={'robot': SimpleNamespace(data=data)}, num_envs=n, device='cpu',
+                           step_dt=.02, episode_length_buf=torch.ones(n, dtype=torch.long))
+
+
+def test_sideways_drift_charges_steady_crab_not_sway():
+    from mjlab_microduck.tasks.cliff.course import sideways_drift
+    from mjlab_microduck.tasks.cliff.env_cfg import make_microduck_cliff_course_env_cfg
+    term = make_microduck_cliff_course_env_cfg().rewards['sideways_drift']
+    assert term.weight > 0  # Self-negating penalty: positive weight, never a reward.
+    crab, sway = _drift_env(.2, -.13), _drift_env(.2, 0.)
+    for step in range(300):  # 6 s at 50 Hz.
+        if step:
+            crab.episode_length_buf += 1; sway.episode_length_buf += 1
+        sway.scene['robot'].data.root_link_lin_vel_w[:, 1] = .15 * math.sin(2 * math.pi * 2 * step * .02)  # 2 Hz gait sway.
+        c, w = sideways_drift(crab), sideways_drift(sway)
+    assert c.item() == pytest.approx(-.13, abs=.005)  # Steady drift is charged in full.
+    assert abs(w.item()) < .02  # Oscillation largely cancels.
+    assert (c <= 0).all() and (w <= 0).all()
+
+
+def test_sideways_drift_uses_heading_frame_and_resets():
+    from mjlab_microduck.tasks.cliff.course import sideways_drift
+    yaw = math.radians(30)  # Turned body walking the way it faces: world velocity along the heading.
+    env = _drift_env(.2 * math.cos(yaw), .2 * math.sin(yaw), yaw=yaw)
+    for step in range(200):
+        if step:
+            env.episode_length_buf += 1
+        value = sideways_drift(env)
+    assert value.item() == pytest.approx(0, abs=1e-6)  # Facing direction is the heading controller's job.
+    env.scene['robot'].data.root_link_lin_vel_w[:] = torch.tensor([[0., .2, 0.]])
+    for _ in range(100):
+        env.episode_length_buf += 1; sideways_drift(env)
+    assert sideways_drift(env).item() < -.05
+    env.episode_length_buf[:] = 1  # New episode: no penalty carried over.
+    env.scene['robot'].data.root_link_lin_vel_w[:] = torch.tensor([[.2 * math.cos(yaw), .2 * math.sin(yaw), 0.]])
+    assert sideways_drift(env).item() == pytest.approx(0, abs=1e-6)

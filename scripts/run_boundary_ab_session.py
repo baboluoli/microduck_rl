@@ -70,27 +70,34 @@ def summarize(directory):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--source', type=Path, required=True, help='Unchanged continuation 249 (model_source.pt)')
-    p.add_argument('--old-trained', type=Path, required=True, help='Old model_99 (boundary as timeout)')
+    p.add_argument('--old-trained', type=Path, help='Old model_99 (boundary as timeout); needed unless --skip-baselines')
     p.add_argument('--curriculum', type=Path, required=True, help='curriculum.json of the 2026-10-24 session')
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--deadline-epoch', type=float, required=True, help='Absolute approved deadline, including retrieval')
     p.add_argument('--updates', type=int, default=100)
+    p.add_argument('--skip-baselines', action='store_true',
+                   help='Skip re-evaluating source and model_99 (already measured with telemetry on 2026-10-24)')
+    p.add_argument('--max-nan-resets', type=int, default=0,
+                   help='Training NaN events tolerated (the guard resets the broken env); 0 = stop on any NaN')
+    p.add_argument('--label', default='boundary-ab', help='Training run label prefix')
     args = p.parse_args()
     assert sha(args.source) == SOURCE_SHA, 'Source checkpoint is not continuation 249'
-    assert sha(args.old_trained) == OLD_SHA, 'Old trained checkpoint is not the audited model_99'
+    if not args.skip_baselines:
+        assert args.old_trained and sha(args.old_trained) == OLD_SHA, 'Old trained checkpoint is not the audited model_99'
     # Reserve 15 minutes for retrieval/shutdown; never exceed two hours.
     deadline = min(args.deadline_epoch, time.time() + 7200) - 900
     args.output.mkdir(parents=True, exist_ok=False)
     (args.output / 'session.json').write_text(json.dumps(dict(
         source=str(args.source), source_sha256=SOURCE_SHA, old_trained=str(args.old_trained),
-        old_trained_sha256=OLD_SHA, deadline_epoch=args.deadline_epoch, training_seed=42,
+        old_trained_sha256=None if args.skip_baselines else OLD_SHA, skip_baselines=args.skip_baselines,
+        max_nan_resets=args.max_nan_resets, label=args.label, deadline_epoch=args.deadline_epoch, training_seed=42,
         updates=args.updates, training_envs=2048, heights=HEIGHTS, distances=DISTANCES, seeds=SEEDS,
         retrieval_reserve_s=900), indent=2))
     (args.output / 'source.diff').write_bytes(subprocess.run(
         ['git', 'diff', 'HEAD'], capture_output=True).stdout)
     environment = dict(os.environ, MUJOCO_GL='egl', PYOPENGL_PLATFORM='egl', WANDB_MODE='offline', PYTHONUNBUFFERED='1')
 
-    def command(cmd, label, warm=False):
+    def command(cmd, label, warm=False, max_nan_resets=0):
         if time.time() >= deadline:
             raise TimeoutError('Retrieval reserve reached')
         log_path = args.output / f'{label}.log'
@@ -98,7 +105,7 @@ def main():
             process = subprocess.Popen(['uv', 'run', *cmd], stdout=log, stderr=subprocess.STDOUT,
                 env=dict(environment, MICRODUCK_WARM_START='1' if warm else '0'), start_new_session=True)
             try:
-                code = wait_checked(process, log_path, deadline)
+                code = wait_checked(process, log_path, deadline, max_nan_resets)
                 if code:
                     raise RuntimeError(f'{label} exit {code}')
             finally:
@@ -112,7 +119,7 @@ def main():
         text = log_path.read_text()
         if re.search(r'(?i)(loss|reward)[^\n]{0,80}\b(?:nan|inf)\b', text):
             raise RuntimeError('Nonfinite losses or rewards')
-        if '[NanGuard] NaN/Inf found' in text:
+        if not max_nan_resets and '[NanGuard] NaN/Inf found' in text:
             raise RuntimeError('Nonfinite training state')
         return text
 
@@ -134,13 +141,14 @@ def main():
     try:
         command(['--with', 'pytest', 'pytest', 'tests/test_cliff_course.py', 'tests/test_nan_forensics.py', '-q'], 'runtime-tests')
         # Telemetry first: cheap, and useful even if training later fails.
-        evaluate(args.source, 'eval-source')
-        evaluate(args.old_trained, 'eval-old-model99')
+        if not args.skip_baselines:
+            evaluate(args.source, 'eval-source')
+            evaluate(args.old_trained, 'eval-old-model99')
 
         state = Curriculum.load(args.curriculum)
         assert state.upper_mm == 22.5, state.upper_mm
         ROOT.mkdir(parents=True, exist_ok=True)
-        source_dir = ROOT / 'boundary-ab-source'
+        source_dir = ROOT / f'{args.label}-source'
         source_dir.mkdir(exist_ok=False)
         copied = source_dir / 'model_source.pt'
         shutil.copy2(args.source, copied)
@@ -153,21 +161,22 @@ def main():
             payload['infos']['env_state'] = {'common_step_counter': iteration * 24}
             torch.save(payload, source_dir / 'model_staged.pt')
 
-        def train(limit, envs, label):
+        def train(limit, envs, label, max_nan_resets=0):
             stage(copied, 0)
             text = command(['train', TASK, '--env.scene.num-envs', str(envs), '--agent.max-iterations', str(limit),
                 '--agent.save-interval', '100', '--agent.seed', '42', '--agent.run-name', label,
-                '--agent.resume', 'True', '--agent.load-run', 'boundary-ab-source',
-                '--agent.load-checkpoint', 'model_staged.pt', '--enable-nan-guard', 'True'], label, warm=True)
+                '--agent.resume', 'True', '--agent.load-run', source_dir.name,
+                '--agent.load-checkpoint', 'model_staged.pt', '--enable-nan-guard', 'True'], label, warm=True,
+                max_nan_resets=max_nan_resets)
             assert 'Loading model checkpoint from:' in text
             assert 'weights/normalizer/optimizer kept' in text
             directory = sorted(ROOT.glob(f'*_{label}'))[-1]
             return max(directory.glob('model_*.pt'), key=lambda q: int(q.stem.split('_')[-1]))
 
-        smoke = train(5, 64, 'boundary-ab-smoke')
+        smoke = train(5, 64, f'{args.label}-smoke')
         command(['python', 'scripts/export.py', TASK, '--checkpoint-file', str(smoke),
                  '--num-envs', '1', '--onnx-file', str(args.output / 'smoke.onnx')], 'smoke-export')
-        trained = train(args.updates, 2048, f'boundary-ab-{args.updates}')
+        trained = train(args.updates, 2048, f'{args.label}-{args.updates}', args.max_nan_resets)
         (args.output / 'trained.json').write_text(json.dumps(dict(checkpoint=str(trained), sha256=sha(trained))))
         evaluate(trained, f'eval-new-model{args.updates - 1}')
         (args.output / 'complete.json').write_text(json.dumps(dict(finished_unix=time.time())))
@@ -178,7 +187,7 @@ def main():
         if NAN_DUMPS.exists():
             shutil.copytree(NAN_DUMPS, args.output / 'nan-dumps', symlinks=True, dirs_exist_ok=True)
         files = [q for q in args.output.rglob('*') if q.is_file() and not q.is_symlink()]
-        files += [q for d in ROOT.glob('*boundary-ab*') for q in d.rglob('*') if q.is_file()]
+        files += [q for d in ROOT.glob(f'*{args.label}*') for q in d.rglob('*') if q.is_file()]
         (args.output / 'SHA256SUMS').write_text(''.join(
             f'{sha(q)}  {q}\n' for q in files if q.name != 'SHA256SUMS'))
 

@@ -362,6 +362,10 @@ def make_microduck_cliff_course_env_cfg(play: bool = False) -> ManagerBasedRlEnv
     # to add the estimated remaining value back onto this failed transition.
     cfg.terminations['course_boundary'] = TerminationTermCfg(func=course.boundary)
     cfg.rewards['cliff_landing'] = RewardTermCfg(func=course.reward, weight=1.)
+    # Progress counts world X only, so nothing else prices sideways drift.
+    # Weight 5 charges model_99's 0.13 m/s crab ~0.65/s, about 16% of the
+    # 4/s full-speed progress reward; the source's 0.056 m/s costs ~0.28/s.
+    cfg.rewards['sideways_drift'] = RewardTermCfg(func=course.sideways_drift, weight=5.)
     return cfg
 
 
