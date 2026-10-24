@@ -80,6 +80,11 @@ def reset(env, env_ids, upper=.02, start_range=(.45, .65), fixed_height=None):
         frontier = torch.randint(max(1, top - 4), max(2, top + 1), (n,), device=env.device)
         easier = torch.randint(0, max(1, top - 4), (n,), device=env.device)
         levels = torch.where(torch.rand(n, device=env.device) < .75, frontier, easier) if top else torch.zeros_like(easier)
+    # Keep a cumulative histogram of actual reset samples. The runner saves
+    # these counts with each checkpoint, so the sampler can be audited later.
+    if not hasattr(env, '_course_height_counts'):
+        env._course_height_counts = torch.zeros(len(HEIGHTS), dtype=torch.long, device=env.device)
+    env._course_height_counts += torch.bincount(levels, minlength=len(HEIGHTS))
     terrain.terrain_levels[env_ids] = levels
     terrain.env_origins[env_ids] = terrain.terrain_origins[levels, terrain.terrain_types[env_ids]]
     robot = env.scene['robot']

@@ -1,0 +1,1264 @@
+{
+  "source": "logs/walkthrough-20261024/logs/walkthrough-session/reference-final",
+  "checkpoint_sha256": "4b1eacacdab3773c8000a47416a30ed693d8d141915c258e2b0948b59702c651",
+  "input_sha256": {
+    "manifest.json": "5c22242ffa291c29ddc6fbae763e1108e6fcf2791ba7e279885a0453808eacba",
+    "episodes.json": "3b937fce443e34bbdc72ba4bc4ad2845334100b6dbcba808e3b7b8c7c73f4916",
+    "model_500-cliff-heading-s20-d0p55.npz": "f6d64800807cf983924b9797bde5fcc75996e9e4b7c8e0b6c07d4f5ed50186d2",
+    "model_500-cliff-heading-s21-d0p55.npz": "4a2fff807f786be8accd9d14590eeb29a731becb91006192888964d9266f1da9",
+    "model_500-cliff-heading-s22-d0p55.npz": "40391bcc6a02e059533f84e300310473bfb194bb98b2f1d539380604fd161dfc"
+  },
+  "analyzer_sha256": "16081c7b68206b7c5fe3573496d785b6b0dfbe135c835be10f68ecff68b94daa",
+  "bonus_proposal": {
+    "block_points": [
+      8,
+      8,
+      8,
+      8,
+      8
+    ],
+    "strict_timeout_points": 40
+  },
+  "pooled": {
+    "episodes": 72,
+    "milestones": 62,
+    "at_least_1_to_5_clean_blocks": [
+      57,
+      49,
+      38,
+      16,
+      2
+    ],
+    "capped_prefix_histogram": {
+      "0": 15,
+      "1": 8,
+      "2": 11,
+      "3": 22,
+      "4": 14,
+      "5": 2
+    },
+    "strict_successes": 0,
+    "impact_terminations": 54,
+    "proposed_bonus_total": 1296,
+    "proposed_bonus_mean": 18.0,
+    "proposed_bonus_nonzero_episodes": 57
+  },
+  "by_seed": {
+    "20": {
+      "episodes": 24,
+      "milestones": 20,
+      "at_least_1_to_5_clean_blocks": [
+        19,
+        16,
+        13,
+        3,
+        0
+      ],
+      "capped_prefix_histogram": {
+        "0": 5,
+        "1": 3,
+        "2": 3,
+        "3": 10,
+        "4": 3,
+        "5": 0
+      },
+      "strict_successes": 0,
+      "impact_terminations": 19,
+      "proposed_bonus_total": 408,
+      "proposed_bonus_mean": 17.0,
+      "proposed_bonus_nonzero_episodes": 19
+    },
+    "21": {
+      "episodes": 24,
+      "milestones": 20,
+      "at_least_1_to_5_clean_blocks": [
+        19,
+        17,
+        11,
+        5,
+        0
+      ],
+      "capped_prefix_histogram": {
+        "0": 5,
+        "1": 2,
+        "2": 6,
+        "3": 6,
+        "4": 5,
+        "5": 0
+      },
+      "strict_successes": 0,
+      "impact_terminations": 17,
+      "proposed_bonus_total": 416,
+      "proposed_bonus_mean": 17.333333333333332,
+      "proposed_bonus_nonzero_episodes": 19
+    },
+    "22": {
+      "episodes": 24,
+      "milestones": 22,
+      "at_least_1_to_5_clean_blocks": [
+        19,
+        16,
+        14,
+        8,
+        2
+      ],
+      "capped_prefix_histogram": {
+        "0": 5,
+        "1": 3,
+        "2": 2,
+        "3": 6,
+        "4": 6,
+        "5": 2
+      },
+      "strict_successes": 0,
+      "impact_terminations": 18,
+      "proposed_bonus_total": 472,
+      "proposed_bonus_mean": 19.666666666666668,
+      "proposed_bonus_nonzero_episodes": 19
+    }
+  },
+  "episodes": [
+    {
+      "seed": 20,
+      "env": 0,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": null,
+      "clean_prefix_blocks": 0,
+      "observed_blocks": 0,
+      "first_failure": {
+        "time_s": 3.16,
+        "reasons": [
+          "impact"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 1,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 3.48,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 3,
+      "first_failure": {
+        "time_s": 7.04,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 2,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 2.44,
+      "clean_prefix_blocks": 2,
+      "observed_blocks": 2,
+      "first_failure": {
+        "time_s": 5.0600000000000005,
+        "reasons": [
+          "impact"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 3,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": null,
+      "clean_prefix_blocks": 0,
+      "observed_blocks": 0,
+      "first_failure": {
+        "time_s": 1.82,
+        "reasons": [
+          "impact"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 4,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 3.58,
+      "clean_prefix_blocks": 0,
+      "observed_blocks": 0,
+      "first_failure": {
+        "time_s": 4.14,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 5,
+      "termination": "time_out",
+      "milestone_time_s": 2.7800000000000002,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 9,
+      "first_failure": {
+        "time_s": 6.78,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": true,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 6,
+      "termination": "time_out",
+      "milestone_time_s": 3.16,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 8,
+      "first_failure": {
+        "time_s": 7.16,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": true,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 7,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 4.62,
+      "clean_prefix_blocks": 2,
+      "observed_blocks": 2,
+      "first_failure": {
+        "time_s": 6.66,
+        "reasons": [
+          "impact"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 8,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 3.2,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 4,
+      "first_failure": {
+        "time_s": 7.2,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 9,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 2.74,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 3,
+      "first_failure": {
+        "time_s": 6.44,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 10,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 2.7600000000000002,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 3,
+      "first_failure": {
+        "time_s": 5.92,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 11,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": null,
+      "clean_prefix_blocks": 0,
+      "observed_blocks": 0,
+      "first_failure": {
+        "time_s": 4.24,
+        "reasons": [
+          "impact"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 12,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": null,
+      "clean_prefix_blocks": 0,
+      "observed_blocks": 0,
+      "first_failure": {
+        "time_s": 7.78,
+        "reasons": [
+          "impact"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 13,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 4.0600000000000005,
+      "clean_prefix_blocks": 4,
+      "observed_blocks": 4,
+      "first_failure": {
+        "time_s": 8.8,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 14,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 3.1,
+      "clean_prefix_blocks": 2,
+      "observed_blocks": 2,
+      "first_failure": {
+        "time_s": 5.58,
+        "reasons": [
+          "impact"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 15,
+      "termination": "time_out",
+      "milestone_time_s": 2.62,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 9,
+      "first_failure": {
+        "time_s": 6.62,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": true,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 16,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 2.84,
+      "clean_prefix_blocks": 4,
+      "observed_blocks": 4,
+      "first_failure": {
+        "time_s": 7.48,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 17,
+      "termination": "time_out",
+      "milestone_time_s": 2.98,
+      "clean_prefix_blocks": 4,
+      "observed_blocks": 9,
+      "first_failure": {
+        "time_s": 7.98,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": true,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 18,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 5.4,
+      "clean_prefix_blocks": 1,
+      "observed_blocks": 1,
+      "first_failure": {
+        "time_s": 6.54,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 19,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 4.5200000000000005,
+      "clean_prefix_blocks": 1,
+      "observed_blocks": 1,
+      "first_failure": {
+        "time_s": 5.8,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 20,
+      "termination": "time_out",
+      "milestone_time_s": 2.5,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 9,
+      "first_failure": {
+        "time_s": 6.5,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": true,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 21,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 3.94,
+      "clean_prefix_blocks": 1,
+      "observed_blocks": 1,
+      "first_failure": {
+        "time_s": 5.34,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 22,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 3.2,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 3,
+      "first_failure": {
+        "time_s": 6.74,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 20,
+      "env": 23,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 3.16,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 3,
+      "first_failure": {
+        "time_s": 7.0200000000000005,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 0,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 3.92,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 3,
+      "first_failure": {
+        "time_s": 7.46,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 1,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": null,
+      "clean_prefix_blocks": 0,
+      "observed_blocks": 0,
+      "first_failure": {
+        "time_s": 1.42,
+        "reasons": [
+          "impact"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 2,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 2.84,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 4,
+      "first_failure": {
+        "time_s": 6.82,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 3,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 2.66,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 3,
+      "first_failure": {
+        "time_s": 6.3,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 4,
+      "termination": "time_out",
+      "milestone_time_s": 4.26,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 7,
+      "first_failure": {
+        "time_s": 8.26,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": true,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 5,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 3.3000000000000003,
+      "clean_prefix_blocks": 2,
+      "observed_blocks": 2,
+      "first_failure": {
+        "time_s": 5.84,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 6,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 2.2600000000000002,
+      "clean_prefix_blocks": 0,
+      "observed_blocks": 0,
+      "first_failure": {
+        "time_s": 3.1,
+        "reasons": [
+          "impact"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 7,
+      "termination": "fallen_too_long",
+      "milestone_time_s": 3.54,
+      "clean_prefix_blocks": 2,
+      "observed_blocks": 3,
+      "first_failure": {
+        "time_s": 6.54,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 8,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 4.34,
+      "clean_prefix_blocks": 2,
+      "observed_blocks": 2,
+      "first_failure": {
+        "time_s": 7.12,
+        "reasons": [
+          "impact"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 9,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 3.34,
+      "clean_prefix_blocks": 2,
+      "observed_blocks": 2,
+      "first_failure": {
+        "time_s": 6.18,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 10,
+      "termination": "time_out",
+      "milestone_time_s": null,
+      "clean_prefix_blocks": 0,
+      "observed_blocks": 0,
+      "first_failure": null,
+      "full_horizon": true,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 11,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": null,
+      "clean_prefix_blocks": 0,
+      "observed_blocks": 0,
+      "first_failure": {
+        "time_s": 4.18,
+        "reasons": [
+          "impact"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 12,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 2.98,
+      "clean_prefix_blocks": 4,
+      "observed_blocks": 5,
+      "first_failure": {
+        "time_s": 7.96,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 13,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": null,
+      "clean_prefix_blocks": 0,
+      "observed_blocks": 0,
+      "first_failure": {
+        "time_s": 1.7,
+        "reasons": [
+          "impact"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 14,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 2.58,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 3,
+      "first_failure": {
+        "time_s": 6.26,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 15,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 3.3000000000000003,
+      "clean_prefix_blocks": 4,
+      "observed_blocks": 4,
+      "first_failure": {
+        "time_s": 7.32,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 16,
+      "termination": "time_out",
+      "milestone_time_s": 2.2600000000000002,
+      "clean_prefix_blocks": 4,
+      "observed_blocks": 9,
+      "first_failure": {
+        "time_s": 7.26,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": true,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 17,
+      "termination": "diagnostic_tile_boundary",
+      "milestone_time_s": 2.92,
+      "clean_prefix_blocks": 2,
+      "observed_blocks": 2,
+      "first_failure": {
+        "time_s": 5.68,
+        "reasons": [
+          "boundary"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 18,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 2.82,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 3,
+      "first_failure": {
+        "time_s": 6.34,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 19,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 2.94,
+      "clean_prefix_blocks": 2,
+      "observed_blocks": 2,
+      "first_failure": {
+        "time_s": 5.32,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 20,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 4.12,
+      "clean_prefix_blocks": 1,
+      "observed_blocks": 1,
+      "first_failure": {
+        "time_s": 5.3,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 21,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 3.36,
+      "clean_prefix_blocks": 1,
+      "observed_blocks": 1,
+      "first_failure": {
+        "time_s": 4.48,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 22,
+      "termination": "time_out",
+      "milestone_time_s": 3.8200000000000003,
+      "clean_prefix_blocks": 4,
+      "observed_blocks": 8,
+      "first_failure": {
+        "time_s": 8.82,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": true,
+      "strict_success": false
+    },
+    {
+      "seed": 21,
+      "env": 23,
+      "termination": "time_out",
+      "milestone_time_s": 2.48,
+      "clean_prefix_blocks": 4,
+      "observed_blocks": 9,
+      "first_failure": {
+        "time_s": 7.48,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": true,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 0,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 2.62,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 4,
+      "first_failure": {
+        "time_s": 6.62,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 1,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 2.2800000000000002,
+      "clean_prefix_blocks": 0,
+      "observed_blocks": 0,
+      "first_failure": {
+        "time_s": 3.24,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 2,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": null,
+      "clean_prefix_blocks": 0,
+      "observed_blocks": 0,
+      "first_failure": {
+        "time_s": 4.68,
+        "reasons": [
+          "impact"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 3,
+      "termination": "time_out",
+      "milestone_time_s": null,
+      "clean_prefix_blocks": 0,
+      "observed_blocks": 0,
+      "first_failure": null,
+      "full_horizon": true,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 4,
+      "termination": "time_out",
+      "milestone_time_s": 3.02,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 8,
+      "first_failure": {
+        "time_s": 7.0200000000000005,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": true,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 5,
+      "termination": "time_out",
+      "milestone_time_s": 2.48,
+      "clean_prefix_blocks": 4,
+      "observed_blocks": 9,
+      "first_failure": {
+        "time_s": 7.48,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": true,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 6,
+      "termination": "time_out",
+      "milestone_time_s": 2.7,
+      "clean_prefix_blocks": 5,
+      "observed_blocks": 9,
+      "first_failure": {
+        "time_s": 8.700000000000001,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": true,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 7,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 3.1,
+      "clean_prefix_blocks": 2,
+      "observed_blocks": 2,
+      "first_failure": {
+        "time_s": 5.92,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 8,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 3.04,
+      "clean_prefix_blocks": 4,
+      "observed_blocks": 4,
+      "first_failure": {
+        "time_s": 7.8,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 9,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 3.3200000000000003,
+      "clean_prefix_blocks": 4,
+      "observed_blocks": 5,
+      "first_failure": {
+        "time_s": 8.32,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 10,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 2.66,
+      "clean_prefix_blocks": 4,
+      "observed_blocks": 5,
+      "first_failure": {
+        "time_s": 7.66,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 11,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 2.92,
+      "clean_prefix_blocks": 2,
+      "observed_blocks": 2,
+      "first_failure": {
+        "time_s": 5.38,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 12,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 2.88,
+      "clean_prefix_blocks": 4,
+      "observed_blocks": 6,
+      "first_failure": {
+        "time_s": 7.88,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 13,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 2.88,
+      "clean_prefix_blocks": 1,
+      "observed_blocks": 1,
+      "first_failure": {
+        "time_s": 4.18,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 14,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 4.38,
+      "clean_prefix_blocks": 1,
+      "observed_blocks": 1,
+      "first_failure": {
+        "time_s": 5.42,
+        "reasons": [
+          "impact"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 15,
+      "termination": "time_out",
+      "milestone_time_s": 2.46,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 9,
+      "first_failure": {
+        "time_s": 6.46,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": true,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 16,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 3.38,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 3,
+      "first_failure": {
+        "time_s": 6.5200000000000005,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 17,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 4.42,
+      "clean_prefix_blocks": 1,
+      "observed_blocks": 1,
+      "first_failure": {
+        "time_s": 6.2,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 18,
+      "termination": "time_out",
+      "milestone_time_s": 2.58,
+      "clean_prefix_blocks": 4,
+      "observed_blocks": 9,
+      "first_failure": {
+        "time_s": 7.58,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": true,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 19,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 3.12,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 5,
+      "first_failure": {
+        "time_s": 7.12,
+        "reasons": [
+          "progress"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 20,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 4.04,
+      "clean_prefix_blocks": 0,
+      "observed_blocks": 0,
+      "first_failure": {
+        "time_s": 4.76,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 21,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 3.04,
+      "clean_prefix_blocks": 3,
+      "observed_blocks": 3,
+      "first_failure": {
+        "time_s": 6.5,
+        "reasons": [
+          "impact"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 22,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 4.24,
+      "clean_prefix_blocks": 0,
+      "observed_blocks": 0,
+      "first_failure": {
+        "time_s": 5.0,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    },
+    {
+      "seed": 22,
+      "env": 23,
+      "termination": "cliff_failed_landing",
+      "milestone_time_s": 2.92,
+      "clean_prefix_blocks": 6,
+      "observed_blocks": 6,
+      "first_failure": {
+        "time_s": 9.700000000000001,
+        "reasons": [
+          "tilt"
+        ]
+      },
+      "full_horizon": false,
+      "strict_success": false
+    }
+  ]
+}

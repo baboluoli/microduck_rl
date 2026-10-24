@@ -6,6 +6,12 @@ from mjlab_microduck.train_hook import maybe_submit_to_hf_jobs
 # train_hook.py). A no-op without the flag.
 maybe_submit_to_hf_jobs()
 
+# Extend mjlab's NaN guard (when enabled) with controls, forces, contacts,
+# randomized model fields and the offending post-step state. See nan_forensics.py.
+from mjlab_microduck import nan_forensics
+
+nan_forensics.install()
+
 from mjlab.tasks.registry import register_mjlab_task
 from mjlab.tasks.velocity.rl import VelocityOnPolicyRunner
 
@@ -72,6 +78,8 @@ from .cliff.env_cfg import (
     MicroduckCliffDropRlCfg,
     make_microduck_cliff_oracle_env_cfg,
     MicroduckCliffOracleRlCfg,
+    make_microduck_cliff_walkthrough_env_cfg,
+    MicroduckCliffWalkThroughRlCfg,
 )
 from .microduck_roller_standup_env_cfg import (
     make_microduck_roller_standup_env_cfg,
@@ -318,6 +326,14 @@ register_mjlab_task(
 )
 
 
+register_mjlab_task(
+    task_id="Mjlab-CliffOracleWalkThrough-Fixed-MicroDuck",
+    env_cfg=make_microduck_cliff_walkthrough_env_cfg(),
+    play_env_cfg=make_microduck_cliff_walkthrough_env_cfg(play=True),
+    rl_cfg=MicroduckCliffWalkThroughRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
 from .cliff.env_cfg import make_microduck_cliff_course_env_cfg, MicroduckCliffCourseRlCfg
 
 class MicroduckCourseRunner(MicroduckOnPolicyRunner):
@@ -334,7 +350,12 @@ class MicroduckCourseRunner(MicroduckOnPolicyRunner):
 
     def save(self, path, infos=None):
         from dataclasses import asdict
-        super().save(path, {**(infos or {}), 'course_curriculum': asdict(self.course_curriculum)})
+        env = self.env.unwrapped
+        counts = getattr(env, '_course_height_counts', None)
+        samples = counts.cpu().tolist() if counts is not None else None
+        print(f'[course] Actual sampled height counts (20 to 30 mm, 0.5 mm bins): {samples}')
+        super().save(path, {**(infos or {}), 'course_curriculum': asdict(self.course_curriculum),
+                            'course_height_counts': samples})
 
     def load(self, *args, **kwargs):
         from .cliff.course_curriculum import Curriculum
@@ -343,6 +364,15 @@ class MicroduckCourseRunner(MicroduckOnPolicyRunner):
             self.course_curriculum = Curriculum(**infos['course_curriculum'])
             cfg = self.env.unwrapped.event_manager.get_term_cfg('course_reset')
             cfg.params['upper'] = self.course_curriculum.upper_mm / 1000
+            # The environment was constructed before checkpoint load, at the
+            # default 20 mm range. Resample the first batch using the restored
+            # stage as well, instead of silently training an easier first batch.
+            self.env.unwrapped.reset()
+            self.env.unwrapped._course_height_counts.zero_()
+            levels = self.env.unwrapped.scene.terrain.terrain_levels
+            from .cliff.course import HEIGHTS
+            import torch
+            self.env.unwrapped._course_height_counts += torch.bincount(levels, minlength=len(HEIGHTS))
         return infos
 
 

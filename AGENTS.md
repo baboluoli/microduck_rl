@@ -25,6 +25,67 @@ uv run --with pytest pytest tests/
 A 5-iteration smoke test at 64 envs catches ~95% of config errors for cents.
 Never launch a long run without one.
 
+## RunPod headless graphics preflight
+
+**Do this on every fresh Linux GPU pod before collecting tests, evaluating a
+checkpoint, or starting a training smoke test.** Our RunPod PyTorch image has
+repeatedly lacked EGL libraries. A working CUDA installation does not imply a
+working graphics installation. MuJoCo imports can fail during test collection,
+even for tests that never explicitly record video.
+
+1. Include these OS packages in the pod bootstrap (run inside the remote Linux
+   container as root, or use `sudo` if required):
+
+   ```bash
+   apt-get update
+   apt-get install -y --no-install-recommends libegl1 libgles2 libgl1 libglx-mesa0 libglib2.0-0
+   ```
+
+   These are system libraries; `uv sync` and Python package installation cannot
+   supply them. Put this step in the reusable bootstrap/image rather than
+   rediscovering it after a failed run.
+
+2. After syncing the project dependencies, run this check in the same remote
+   project directory and environment that will run the workload:
+
+   ```bash
+   MUJOCO_GL=egl PYOPENGL_PLATFORM=egl uv run python - <<'PY'
+   import ctypes
+   import torch
+
+   # CUDA handles simulation; EGL creates the headless graphics context.
+   # Check both: success in one says nothing about the other.
+   ctypes.CDLL("libEGL.so.1")
+   ctypes.CDLL("libGLESv2.so.2")
+   assert torch.cuda.is_available(), "CUDA is unavailable in this Python environment"
+   import mujoco
+
+   context = mujoco.GLContext(16, 16)
+   try:
+       context.make_current()
+       print("CUDA and headless EGL context passed:", torch.cuda.get_device_name(0))
+   finally:
+       context.free()
+   PY
+   ```
+
+3. Export `MUJOCO_GL=egl` and `PYOPENGL_PLATFORM=egl` before launching Python
+   for headless tests, evaluation, training, and video capture. Keep these in
+   the remote session runner's environment; setting them only in a local shell
+   does not configure SSH subprocesses. Then run the task-specific CUDA tests
+   and short training smoke test before the authorized longer run.
+
+If an import reports an EGL-related `AttributeError` involving `NoneType`, or
+cannot load `libEGL.so.1`, check this bootstrap first. If the libraries load but
+context creation fails, inspect NVIDIA EGL vendor/driver availability and the
+container's GPU graphics exposure. Installing Mesa libraries alone does not
+prove that NVIDIA EGL works. Stop at the failed preflight and fix the container;
+do not repeatedly launch pytest or change task/reward code to address it.
+
+Record the working image, bootstrap command, and preflight result in the run
+notes. This check does not replace the task-specific smoke test or permission
+to start a RunPod training run.
+
 ## Repo map
 
 - `src/mjlab_microduck/tasks/mdp.py` — shared MDP functions (rewards, events,

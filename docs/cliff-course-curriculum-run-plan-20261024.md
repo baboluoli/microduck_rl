@@ -156,3 +156,10 @@ snapshots, curriculum history, manifests, raw traces and videos before stopping.
 Confirm actual stopped runtime and retire the session watchdog. Report the achieved
 range, remaining failures, measured cost/timing and whether another bounded
 session is warranted. No further session is automatically authorized.
+
+## Execution record
+
+Executed once with separate user approval on 2026-10-24, using continuation 249
+directly at the user's request. See [the run results](cliff-course-curriculum-run-results-20261024.md).
+The pod is stopped; the source was retained after regression and a nonfinite-state
+stop. This record does not authorize another session.

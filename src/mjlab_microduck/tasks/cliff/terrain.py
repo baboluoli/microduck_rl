@@ -22,6 +22,10 @@ class CliffDropTerrainCfg(SubTerrainCfg):
     max_drop: float = 0.10
     height_buckets: tuple[float, ...] = (0.02, 0.04, 0.06, 0.08, 0.10)
     thickness: float = 0.3
+    # mjlab places each tile by its lower-left corner. Historical tasks keep
+    # their original layout; course tiles opt in to centering inside that tile
+    # so the flat outer border cannot cover half of the lower platform.
+    center_in_tile_y: bool = False
 
     def function(self, difficulty: float, spec: mujoco.MjSpec, rng) -> TerrainOutput:
         if not 0.0 < self.spawn_x < self.edge_x < self.size[0]:
@@ -38,6 +42,7 @@ class CliffDropTerrainCfg(SubTerrainCfg):
         width = self.size[1] - 0.3
         terrain = spec.body("terrain")
         geoms = []
+        center_y = self.size[1] / 2 if self.center_in_tile_y else 0.0
         for x0, x1, z, color in (
             (0.0, self.edge_x, 0.0, (0.52, 0.53, 0.55, 1.0)),
             (self.edge_x, self.size[0], -drop, (0.34, 0.42, 0.46, 1.0)),
@@ -45,11 +50,11 @@ class CliffDropTerrainCfg(SubTerrainCfg):
             geom = terrain.add_geom(
                 type=mujoco.mjtGeom.mjGEOM_BOX,
                 size=((x1 - x0) / 2.0, width / 2.0, self.thickness / 2.0),
-                pos=((x0 + x1) / 2.0, 0.0, z - self.thickness / 2.0),
+                pos=((x0 + x1) / 2.0, center_y, z - self.thickness / 2.0),
             )
             geoms.append(TerrainGeometry(geom=geom, color=color))
 
         return TerrainOutput(
-            origin=np.array([self.spawn_x, 0.0, 0.0]),
+            origin=np.array([self.spawn_x, center_y, 0.0]),
             geometries=geoms,
         )

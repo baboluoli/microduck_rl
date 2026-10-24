@@ -27,3 +27,17 @@ From the RL project root:
 
 Ordinary `uv run train` does not automatically run the separate evaluator.
 Runpod training requires approval before starting.
+
+## Possible optimizations
+
+- randomize spawn distance from edge 35–75 cm uniformly during training
+- two separate policies for walking and dropping from/stabilizing after the cliff
+
+## Current experiment direction (2026-10-24)
+
+Pablo’s goal is to handle the drop and continue forward for one metre after
+genuine lower-floor foot contact, at the policy’s preferred walking speed.
+First establish reliable 2 cm performance, then progress through larger heights.
+See [distance-goal scores and height plan](../../../../docs/cliff-distance-goal-and-height-plan-20261024.md).
+The existing training tasks still implement their historical objectives; this
+plan does not make the old session runner suitable for a new height run.

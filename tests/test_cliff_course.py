@@ -47,6 +47,18 @@ def test_latched_impact_and_contact_tilt():
     assert not tick(s,2).item()
 
 
+@pytest.mark.parametrize('side', [-1., 1.])
+def test_boundary_is_strict_and_latched(side):
+    # Exactly on the permitted line is valid; crossing it ends the task even
+    # if the same sample reaches the finish. Returning inside cannot erase it.
+    s = CourseState(1, 'cpu')
+    tick(s, x=torch.tensor([1.]), y=torch.tensor([side*1.15]))
+    assert not s.boundary.item()
+    assert not tick(s, 2, y=torch.tensor([side*1.151])).item()
+    assert s.boundary.item()
+    assert not tick(s, 3).item()
+
+
 def test_gates_persistence_regression(tmp_path):
     c = Curriculum()
     batch = {k:Result((22,22,22), 2, 68) for k in c.conditions()}
@@ -71,6 +83,8 @@ def test_config_and_reward_integration():
     assert cfg.episode_length_s == 12
     assert cfg.scene.terrain.terrain_generator.num_rows == len(HEIGHTS)
     assert 'cliff_landing' not in cfg.terminations
+    assert not cfg.terminations['course_boundary'].time_out
+    assert cfg.terminations['time_out'].time_out
     for dt in (.01,.02,.04):
         s = CourseState(1,'cpu')
         tick(s)
@@ -181,3 +195,31 @@ def test_precompiled_bank_matches_declared_heights_and_footprint():
         assert model.geom_pos[1,0]+model.geom_size[1,0]-.95 == pytest.approx(4.05)
         assert model.geom_pos[1,2]+model.geom_size[1,2] == pytest.approx(-height)
         assert 4.05-FINISH == pytest.approx(.5)
+
+
+def test_full_course_bank_has_no_border_overlap():
+    """Raycast the complete bank, including its border, on both sides of spawn.
+
+    Testing a single isolated box missed a real bug: the tile was centered on
+    the grid corner, and the outer flat border covered half its lower floor.
+    Rays measure the surface physics will actually collide with.
+    """
+    import mujoco
+    import numpy as np
+    from mjlab.terrains.terrain_generator import TerrainGenerator
+    from mjlab_microduck.tasks.cliff.env_cfg import make_microduck_cliff_course_env_cfg
+    cfg = make_microduck_cliff_course_env_cfg(play=True)
+    generator = TerrainGenerator(cfg.scene.terrain.terrain_generator, device='cpu')
+    spec = mujoco.MjSpec()
+    generator.compile(spec)
+    model = spec.compile()
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    for row, height in enumerate(HEIGHTS):
+        origin = generator.terrain_origins[row, 0]
+        for x in (.75, 2., 3.55):
+            for y in (-1.1, -.2, .2, 1.1):
+                point = origin + np.array([x, y, 1.])
+                distance = mujoco.mj_ray(model, data, point, np.array([0., 0., -1.]),
+                                         None, 1, -1, np.array([-1], dtype=np.int32))
+                assert point[2] - distance == pytest.approx(-height, abs=1e-7)

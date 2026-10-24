@@ -15,6 +15,7 @@ import signal
 import subprocess
 import time
 import torch
+from cliff_course_process import wait_checked
 from mjlab_microduck.tasks.cliff.course_curriculum import Curriculum, Result, rank
 
 TASK = 'Mjlab-CliffOracleCourse-MicroDuck'
@@ -24,6 +25,8 @@ ROOT = Path('logs/rsl_rl/oracle_course')
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--sources',nargs=3,type=Path,required=True)
+    p.add_argument('--direct-source',type=Path,help='Use this unchanged checkpoint without source ranking')
+    p.add_argument('--review-file',type=Path,help='Wait for operator evidence review before smoke/training')
     p.add_argument('--output',type=Path,required=True)
     p.add_argument('--deadline-epoch',type=float,required=True,help='Absolute approved session deadline, including retrieval')
     args = p.parse_args()
@@ -42,14 +45,14 @@ def main():
         for path in ('pyproject.toml','uv.lock','AGENTS.md'):
             archive.add(path)
     (args.output/'source.diff').write_bytes(subprocess.check_output(['git','diff','HEAD']))
-    environment = dict(os.environ,MUJOCO_GL='egl',PYOPENGL_PLATFORM='egl',WANDB_MODE='offline')
+    environment = dict(os.environ,MUJOCO_GL='egl',PYOPENGL_PLATFORM='egl',WANDB_MODE='offline',PYTHONUNBUFFERED='1')
     def command(command,label,warm=False):
         if time.time() >= deadline: raise TimeoutError('Retrieval reserve reached')
         with (args.output/f'{label}.log').open('w') as log:
             process = subprocess.Popen(['uv','run',*command],stdout=log,stderr=subprocess.STDOUT,
                 env=dict(environment,MICRODUCK_WARM_START='1' if warm else '0'),start_new_session=True)
             try:
-                code = process.wait(timeout=max(1,deadline-time.time()))
+                code = wait_checked(process, args.output/f'{label}.log', deadline)
                 if code: raise RuntimeError(f'{label} exit {code}')
             finally:
                 if process.poll() is None:
@@ -89,13 +92,21 @@ def main():
 
     command(['--with','pytest','pytest','tests/test_cliff_course.py','-q'],'runtime-tests')
     # Fully evaluate every candidate before selection. Strict > preserves ties.
-    candidates = [(source,evaluate(source,.02,(20,21,22),(.55,),True)) for source in args.sources]
+    candidates = [(source,evaluate(source,.02,(20,21,22),(.55,),True))
+                  for source in ([args.direct_source] if args.direct_source else args.sources)]
     source,best_batch = candidates[0]
     for checkpoint,batch in candidates[1:]:
         if rank(batch.values()) > rank(best_batch.values()): source,best_batch=checkpoint,batch
     evaluate(source,.02,(40,41,42),(.55,))
     development = evaluate(source,.02,(20,21,22))
     confirmation = evaluate(source,.02,(40,41,42))
+    if args.review_file:
+        # The operator reviews contact traces, timeout adequacy, reward totals,
+        # and matched videos before allowing any training to begin.
+        (args.output/'awaiting-review.json').write_text(json.dumps(dict(source=str(source))))
+        while not args.review_file.exists():
+            if time.time() >= deadline: raise TimeoutError('Evidence review reached retrieval reserve')
+            time.sleep(5)
     state = Curriculum()
     # A healthy timeout close to the finish is evidence to review the deadline,
     # not permission to train a faster gait under an accidental speed floor.

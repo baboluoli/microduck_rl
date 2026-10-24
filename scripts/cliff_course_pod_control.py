@@ -19,18 +19,19 @@ def main():
     p.add_argument('--pod-id',required=True)
     p.add_argument('--deadline-epoch',type=float)
     p.add_argument('--ssh-host')
+    p.add_argument('--ssh-config',type=Path,help='Session-specific OpenSSH config (including port and key)')
     p.add_argument('--remote-root')
     p.add_argument('--output-relative',default='logs/course-session')
     p.add_argument('--destination',type=Path)
     args = p.parse_args()
     def stop():
-        subprocess.run(['uv','run','--no-sync','runpodctl','stop','pod',args.pod_id],check=True)
+        subprocess.run(['uv','run','--no-sync','runpodctl','pod','stop',args.pod_id],check=True)
         for _ in range(12):
-            result = subprocess.run(['uv','run','--no-sync','runpodctl','get','pod',args.pod_id],
+            result = subprocess.run(['uv','run','--no-sync','runpodctl','pod','get',args.pod_id],
                                     check=True,capture_output=True,text=True)
             state = json.loads(result.stdout)
             records = state if isinstance(state,list) else [state]
-            if any(str(row.get('desiredStatus',row.get('status',''))).upper() in ('EXITED','STOPPED') for row in records):
+            if any(str(row.get('runtimeStatus','')).upper() == 'STOPPED' for row in records):
                 print(f'Confirmed stopped status for {args.pod_id}')
                 return
             time.sleep(5)
@@ -53,7 +54,8 @@ def main():
         # structure so local validation can resolve the identical paths.
         manifest = args.destination/args.output_relative/'SHA256SUMS'
         manifest.parent.mkdir(parents=True,exist_ok=True)
-        subprocess.run(['scp',f'{args.ssh_host}:{shlex.quote(remote+args.output_relative+"/SHA256SUMS")}',str(manifest)],check=True)
+        ssh_options = ['-F',str(args.ssh_config)] if args.ssh_config else []
+        subprocess.run(['scp',*ssh_options,f'{args.ssh_host}:{shlex.quote(remote+args.output_relative+"/SHA256SUMS")}',str(manifest)],check=True)
         paths = []
         expected = {}
         for line in manifest.read_text().splitlines():
@@ -64,7 +66,7 @@ def main():
             expected[path]=digest
         file_list = args.destination/'retrieval-files.txt'
         file_list.write_text('\n'.join(paths)+'\n')
-        subprocess.run(['rsync','-a','--protect-args','--files-from',str(file_list),
+        subprocess.run(['rsync','-a','-e',shlex.join(['ssh',*ssh_options]),'--files-from',str(file_list),
                         f'{args.ssh_host}:{remote}',str(args.destination)+'/'],check=True)
         for path,digest in expected.items():
             actual=hashlib.sha256((args.destination/path).read_bytes()).hexdigest()

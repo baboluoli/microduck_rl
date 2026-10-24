@@ -154,3 +154,13 @@ up to 1000 main updates at 2048 environments, never above 3 cm, with retrieval
 and verified stop inside two hours. If setup/confirmation consumes the budget,
 return evidence and stop without training. The Mac must remain awake/online for
 the independent shutdown watchdog. This request does not include deployment.
+
+## Runtime session follow-up
+
+The separately approved 2026-10-24 session is recorded in
+[the run results](cliff-course-curriculum-run-results-20261024.md). GPU validation
+passed 39 course tests after fixing course tile/border overlap and video writing.
+The 2 cm source gate passed; continuation then regressed and stopped on a
+nonfinite state. Checkpoint 249 remains retained. A subsequent local fail-fast
+monitor fix passed five subprocess tests; it was not rerun on a GPU. The original
+pre-session “unrun” statements above describe the preparation-time status.

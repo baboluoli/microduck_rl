@@ -321,6 +321,23 @@ MicroduckCliffOracleRlCfg.run_name = "cliff_oracle_2cm"
 MicroduckCliffOracleRlCfg.algorithm.symmetry_cfg = None  # The deployed symmetry map covers 61 inputs, so disable it for this interface.
 
 
+def make_microduck_cliff_walkthrough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+    """Continue walking for the full horizon, always starting 55 cm from edge."""
+    from . import walkthrough
+    cfg = make_microduck_cliff_oracle_env_cfg(play=play)
+    cfg.episode_length_s = 12.0
+    cfg.terminations.pop('cliff_landing')
+    cfg.terminations['walkthrough_boundary'] = TerminationTermCfg(
+        func=walkthrough.boundary, time_out=True)
+    cfg.rewards['cliff_landing'] = RewardTermCfg(func=walkthrough.reward, weight=1.)
+    return cfg
+
+
+MicroduckCliffWalkThroughRlCfg = deepcopy(MicroduckCliffOracleRlCfg)
+MicroduckCliffWalkThroughRlCfg.experiment_name = 'oracle_walkthrough_fixed'
+MicroduckCliffWalkThroughRlCfg.run_name = 'oracle_walkthrough_fixed'
+
+
 def make_microduck_cliff_course_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     """Fixed finish, immutable 0.5 mm height bank, randomized approach only."""
     from . import course
@@ -333,6 +350,7 @@ def make_microduck_cliff_course_env_cfg(play: bool = False) -> ManagerBasedRlEnv
     tile = generator.sub_terrains['cliff_drop']
     tile.min_drop, tile.max_drop = course.HEIGHTS[0], course.HEIGHTS[-1]
     tile.height_buckets = course.HEIGHTS
+    tile.center_in_tile_y = True  # Keep the complete course clear of the flat grid border.
     cfg.scene.terrain.max_init_terrain_level = 0
     for group in ('actor', 'critic'):
         cfg.observations[group].terms['cliff_terrain'] = ObservationTermCfg(func=course.observation)
@@ -340,7 +358,9 @@ def make_microduck_cliff_course_env_cfg(play: bool = False) -> ManagerBasedRlEnv
         params={'upper': .02, 'start_range': (.55, .55) if play else (.45, .65)})
     cfg.terminations.pop('cliff_landing')
     cfg.terminations['course_success'] = TerminationTermCfg(func=course.success)
-    cfg.terminations['course_boundary'] = TerminationTermCfg(func=course.boundary, time_out=True)
+    # Leaving the permitted course is a task failure. A timeout would tell PPO
+    # to add the estimated remaining value back onto this failed transition.
+    cfg.terminations['course_boundary'] = TerminationTermCfg(func=course.boundary)
     cfg.rewards['cliff_landing'] = RewardTermCfg(func=course.reward, weight=1.)
     return cfg
 

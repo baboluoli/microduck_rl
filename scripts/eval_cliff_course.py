@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import platform
+import numpy as np
 import subprocess
 import torch
 from mjlab.envs import ManagerBasedRlEnv
@@ -26,6 +27,13 @@ def evaluate(checkpoint, *, height, distance, seed, output, device='cuda:0', vid
     cfg.scene.num_envs = 24
     cfg.seed = seed
     cfg.events['course_reset'].params.update(fixed_height=height, start_range=(distance,distance))
+    if video:
+        # Isolate and follow the preselected robot for the complete course.
+        cfg.viewer.env_idx = 0
+        cfg.viewer.origin_type = cfg.viewer.OriginType.WORLD
+        cfg.viewer.max_extra_envs = 0
+        cfg.viewer.width, cfg.viewer.height = 960, 640
+        cfg.viewer.distance, cfg.viewer.azimuth, cfg.viewer.elevation = 1.4, 90., -15.
     frames = []
     def probe(env):
         s = course.update(env)
@@ -48,6 +56,14 @@ def evaluate(checkpoint, *, height, distance, seed, output, device='cuda:0', vid
         rows = []
         for i in range(24):
             rows.append(dict(x=p[i,0].item(), y=p[i,1].item(), age=env.episode_length_buf[i].item(),
+                # Capture before autoreset. World Y drift and body-sideways
+                # motion differ when the robot turns; retain both frames.
+                heading=d.heading_w[i].item(),
+                vy=d.root_link_lin_vel_w[i,1].item(),
+                velocity_body=d.root_link_lin_vel_b[i].tolist(),
+                angular_velocity_body=d.root_link_ang_vel_b[i].tolist(),
+                angular_velocity_world=d.root_link_ang_vel_w[i].tolist(),
+                command=env.command_manager.get_command('twist')[i].tolist(),
                 cos_tilt=(1-2*(q[i,1]**2+q[i,2]**2)).item(), head=contact_forces[0][i].item(),
                 trunk=contact_forces[1][i].item(), finite=not s.nonfinite[i].item(),
                 failure=failure[i].item(), pulse=s.pulse[i].item(),
@@ -88,9 +104,10 @@ def evaluate(checkpoint, *, height, distance, seed, output, device='cuda:0', vid
                 obs, _, done, _ = wrapped.step(actions)
                 if writer and active[0] and len(traces[0]) % 2 == 0:
                     from PIL import Image, ImageDraw
+                    env._offline_renderer._cam.lookat[:] = env.scene['robot'].data.root_link_pos_w[0].cpu().numpy()
                     frame = Image.fromarray(env.render())
                     ImageDraw.Draw(frame).text((10,10),f'{checkpoint.name} h={height*100:.2f}cm start={distance:.2f}m seed={seed} env=0',fill='white')
-                    writer.append_data(frame)
+                    writer.append_data(np.asarray(frame))
                 terms = env.reward_manager._term_names
                 weighted = env.reward_manager._step_reward * env.step_dt
                 for i in range(24):
