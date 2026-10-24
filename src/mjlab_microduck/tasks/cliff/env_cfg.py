@@ -98,11 +98,9 @@ def make_microduck_cliff_drop_env_cfg(
     twist.rel_heading_envs = 1.0  # Give every robot a target heading instead of an independently sampled yaw rate.
     twist.heading_command = True  # Convert heading error into a requested turning speed.
     twist.ranges.heading = (0.0, 0.0)  # Aim along world +X, which is the direction toward and beyond the cliff.
-    twist.heading_control_stiffness = 2.0  # Use proportional heading correction: larger values request stronger turns for the same error.
     twist.rel_turn_in_place_envs = 0.0  # Do not allocate episodes to turning on the spot.
     twist.ranges.lin_vel_x = (0.18, 0.24)  # Sample forward walking targets between 0.18 and 0.24 metres per second.
     twist.ranges.lin_vel_y = (0.0, 0.0)  # Request no sideways walking.
-    twist.ranges.ang_vel_z = (-0.6, 0.6)  # Limit heading-controller turning commands to this range in radians per second.
     twist.init_velocity_prob = 0.0  # Disable the command generator's optional initial-velocity injection.
 
     # Remove some existing values from the regular Tinyduck config for changing up some walking parameters with time that we don't need.
@@ -123,25 +121,9 @@ def make_microduck_cliff_drop_env_cfg(
     for name in ("randomize_com", "randomize_head_com"):  # Keep body and head centre-of-mass uncertainty small: offsets within +/-3 mm.
         if name in cfg.events:
             cfg.events[name].params["ranges"] = (-0.003, 0.003)
-    cfg.events["cliff_midair_reset"] = EventTermCfg(  # Start some training episodes already in flight so landing receives experience early.
-        func=cliff_mdp.cliff_midair_reset,
-        mode="reset",
-        params={
-            "edge_distance": EDGE_DISTANCE,  # Locate the edge 0.55 metres ahead of the normal spawn.
-            "probability": 0.35 if not play else 0.0,  # Use midair starts for 35% of training resets and none during playback.
-        },
-    )
-
     # The normal walking task resets on a fall. Here falling and recovering
     # are part of the episode, and all body parts can collide with the floor.
     cfg.terminations.pop("fell_over", None)
-    cfg.terminations["fallen_too_long"] = TerminationTermCfg(
-        func=microduck_mdp.fallen_too_long,
-        time_out=False,  # Treat this as a terminal outcome rather than a time-limit truncation.
-        # World z cannot classify a fall because the lower floor varies in z.
-        params={"gate_z_below": -0.5, "gate_tilt_above_deg": 45.0, "max_duration_s": 4.0},
-    )
-
     # Detect servo housings hitting the floor and penalize.
     # Measure terrain forces on servo housings for the servo-impact penalty.
     servo_ground = ContactSensorCfg(
@@ -250,17 +232,21 @@ def make_microduck_cliff_drop_env_cfg(
     cfg.curriculum.pop("terrain_levels", None)  # Disable automatic movement between height rows; the maximum training height is set externally.
     # Prefer an explicit profile argument; otherwise read the environment variable, defaulting to heading.
     profile = profile if profile is not None else os.environ.get("MICRODUCK_CLIFF_PROFILE", "heading")
-    if profile == "steering":
+    # Each branch owns all profile-specific settings; shared commands above apply to both.
+    if profile == "heading":
+        twist.heading_control_stiffness = 2.0  # Correct heading errors more strongly.
+        twist.ranges.ang_vel_z = (-0.6, 0.6)  # Allow faster turning corrections, in rad/s.
+        midair_probability = 0.0 if play else 0.35  # Practice landings directly during training.
+        recovery_duration_s = 4.0  # Allow time to recover after a fall.
+        # Keep the velocity-tracking reward inherited from the walking task.
+    elif profile == "steering":
         # Requires prepare_cliff_steering_checkpoint.py for a zero-yaw
         # source: its unused input column must not receive arbitrary new
         # normalized values when the heading controller is enabled.
-        twist.heading_command = True
-        twist.rel_heading_envs = 1.0
-        twist.ranges.heading = (0.0, 0.0)
         twist.heading_control_stiffness = 0.5  # Use gentler heading correction than the default heading profile.
         twist.ranges.ang_vel_z = (-0.3, 0.3)  # Restrict steering corrections to +/-0.3 radians per second.
         # Train the full approach and descent instead of starting partway through the landing.
-        cfg.events["cliff_midair_reset"].params["probability"] = 0.0
+        midair_probability = 0.0
         # Replace velocity tracking with capped world-X progress, so standing still earns no forward credit.
         cfg.rewards["track_linear_velocity"] = RewardTermCfg(
             func=cliff_mdp.cliff_forward_progress, weight=4.0,
@@ -271,9 +257,27 @@ def make_microduck_cliff_drop_env_cfg(
             params=dict(completion_params), time_out=False,
         )
         # Shorten the recovery window to half a second for the steering profile.
-        cfg.terminations["fallen_too_long"].params["max_duration_s"] = 0.5
-    elif profile != "heading":  # The heading profile needs no overrides; reject unrecognized profile names.
+        recovery_duration_s = 0.5
+    else:  # Reject unrecognized profile names.
         raise ValueError("MICRODUCK_CLIFF_PROFILE must be heading or steering")
+
+    # Wire the reset and fall timer once, using the selected profile values.
+    cfg.events["cliff_midair_reset"] = EventTermCfg(  # Start some training episodes already in flight so landing receives experience early.
+        func=cliff_mdp.cliff_midair_reset,
+        mode="reset",
+        params={
+            "edge_distance": EDGE_DISTANCE,  # Locate the edge 0.55 metres ahead of the normal spawn.
+            "probability": midair_probability,  # Use the reset mix selected by the profile.
+        },
+    )
+
+    cfg.terminations["fallen_too_long"] = TerminationTermCfg(
+        func=microduck_mdp.fallen_too_long,
+        time_out=False,  # Treat this as a terminal outcome rather than a time-limit truncation.
+        # World z cannot classify a fall because the lower floor varies in z.
+        params={"gate_z_below": -0.5, "gate_tilt_above_deg": 45.0, "max_duration_s": recovery_duration_s},
+    )
+
     return cfg  # Return the configuration; simulation and training are started elsewhere.
 
 
@@ -293,7 +297,9 @@ def make_microduck_cliff_oracle_env_cfg(play: bool = False) -> ManagerBasedRlEnv
     to both observation groups. This is a simulation-only interface; it needs
     a matching terrain estimator before any hardware deployment.
     """
-    cfg = make_microduck_cliff_drop_env_cfg(  # Reuse the steering task with every terrain tile fixed to a 2 cm drop.
+    # Choose steering for its full-approach starts, progress reward, and strict failures.
+    # Exact terrain observations below are independent of that choice of training profile.
+    cfg = make_microduck_cliff_drop_env_cfg(
         play=play, profile="steering", fixed_drop=ORACLE_DROP_HEIGHT,
     )
     # Use the full requested grid with random allocation; all tiles still have the same fixed height.
@@ -304,7 +310,6 @@ def make_microduck_cliff_oracle_env_cfg(play: bool = False) -> ManagerBasedRlEnv
             func=cliff_mdp.cliff_terrain_observation,
             params={"edge_distance": EDGE_DISTANCE, "drop_height": ORACLE_DROP_HEIGHT},
         )
-    cfg.events["cliff_midair_reset"].params["probability"] = 0.0  # Always start on the upper platform so the oracle practices the entire descent.
     cfg.terminations.pop("out_of_terrain_bounds", None)  # Remove the inherited terrain-boundary termination for this oracle experiment.
     return cfg  # Return the configuration; simulation and training are started elsewhere.
 

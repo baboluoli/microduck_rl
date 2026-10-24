@@ -66,3 +66,24 @@ def test_steering_profile_keeps_interface_and_ends_disqualified_attempts(monkeyp
     assert list(cfg.observations["actor"].terms)[:6] == base
     assert list(cfg.observations["critic"].terms)[:7] == ["base_lin_vel", *base]
     assert cfg.curriculum == {}
+
+
+@pytest.mark.parametrize("play", [False, True])
+@pytest.mark.parametrize("profile", ["heading", "steering"])
+def test_profile_command_reset_and_recovery_settings(profile, play):
+    cfg = make_microduck_cliff_drop_env_cfg(play=play, profile=profile)
+    twist = cfg.commands["twist"]
+    assert twist.rel_standing_envs == 0.0
+    assert twist.rel_heading_envs == 1.0
+    assert twist.heading_command
+    assert twist.ranges.heading == (0.0, 0.0)
+    assert twist.ranges.lin_vel_x == (0.18, 0.24)
+    assert twist.ranges.lin_vel_y == (0.0, 0.0)
+    assert twist.heading_control_stiffness == (2.0 if profile == "heading" else 0.5)
+    assert twist.ranges.ang_vel_z == ((-0.6, 0.6) if profile == "heading" else (-0.3, 0.3))
+    expected_midair = 0.35 if profile == "heading" and not play else 0.0
+    assert cfg.events["cliff_midair_reset"].params["probability"] == expected_midair
+    assert cfg.terminations["fallen_too_long"].params["max_duration_s"] == (
+        4.0 if profile == "heading" else 0.5
+    )
+    assert ("cliff_failed_landing" in cfg.terminations) == (profile == "steering")
