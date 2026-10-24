@@ -1,0 +1,17 @@
+{
+  "sources": [
+    {
+      "path": "logs/walking-blocks-20261024/artifacts/logs/rsl_rl/oracle_walkthrough_fixed/source-oracle500/model_500.pt",
+      "sha256": "4b1eacacdab3773c8000a47416a30ed693d8d141915c258e2b0948b59702c651"
+    },
+    {
+      "path": "logs/walking-blocks-20261024/artifacts/logs/rsl_rl/oracle_walkthrough_fixed/2026-10-24_15-32-30_walkthrough-fixed-seed42/model_100.pt",
+      "sha256": "1faea372cd65edd9fd2837eb03c76b10cdb79c9592ec4f14679ea977be489488"
+    },
+    {
+      "path": "logs/walking-blocks-20261024/artifacts/logs/rsl_rl/oracle_walkthrough_fixed/2026-10-24_15-32-30_walkthrough-fixed-seed42/model_249.pt",
+      "sha256": "ef70ae031f61b64686aef2d428338de5d2562adf0d6847b3d133092770223a06"
+    }
+  ],
+  "status": "prepared locally; CUDA and session operations not validated"
+}

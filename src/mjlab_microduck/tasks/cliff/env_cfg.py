@@ -319,3 +319,32 @@ MicroduckCliffOracleRlCfg.experiment_name = "cliff_oracle_2cm"
 MicroduckCliffOracleRlCfg.run_name = "cliff_oracle_2cm"
 
 MicroduckCliffOracleRlCfg.algorithm.symmetry_cfg = None  # The deployed symmetry map covers 61 inputs, so disable it for this interface.
+
+
+def make_microduck_cliff_course_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+    """Fixed finish, immutable 0.5 mm height bank, randomized approach only."""
+    from . import course
+    cfg = make_microduck_cliff_oracle_env_cfg(play)
+    cfg.episode_length_s = 12.
+    generator = cfg.scene.terrain.terrain_generator
+    generator.curriculum = True
+    generator.num_rows = len(course.HEIGHTS)
+    generator.difficulty_range = (0., 1.)
+    tile = generator.sub_terrains['cliff_drop']
+    tile.min_drop, tile.max_drop = course.HEIGHTS[0], course.HEIGHTS[-1]
+    tile.height_buckets = course.HEIGHTS
+    cfg.scene.terrain.max_init_terrain_level = 0
+    for group in ('actor', 'critic'):
+        cfg.observations[group].terms['cliff_terrain'] = ObservationTermCfg(func=course.observation)
+    cfg.events['course_reset'] = EventTermCfg(func=course.reset, mode='reset',
+        params={'upper': .02, 'start_range': (.55, .55) if play else (.45, .65)})
+    cfg.terminations.pop('cliff_landing')
+    cfg.terminations['course_success'] = TerminationTermCfg(func=course.success)
+    cfg.terminations['course_boundary'] = TerminationTermCfg(func=course.boundary, time_out=True)
+    cfg.rewards['cliff_landing'] = RewardTermCfg(func=course.reward, weight=1.)
+    return cfg
+
+
+MicroduckCliffCourseRlCfg = deepcopy(MicroduckCliffOracleRlCfg)
+MicroduckCliffCourseRlCfg.experiment_name = 'oracle_course'
+MicroduckCliffCourseRlCfg.run_name = 'oracle_course'

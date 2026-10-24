@@ -316,3 +316,40 @@ register_mjlab_task(
     rl_cfg=MicroduckCliffOracleRlCfg,
     runner_cls=MicroduckOnPolicyRunner,
 )
+
+
+from .cliff.env_cfg import make_microduck_cliff_course_env_cfg, MicroduckCliffCourseRlCfg
+
+class MicroduckCourseRunner(MicroduckOnPolicyRunner):
+    """Store curriculum evidence inside the full optimizer/normalizer checkpoint."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .cliff.course_curriculum import Curriculum
+        self.course_curriculum = Curriculum()
+
+    def learn(self, num_learning_iterations, init_at_random_ep_len=False):
+        # The course measures complete attempts. Randomizing initial episode
+        # ages would silently shorten some first attempts below 12 seconds.
+        return super().learn(num_learning_iterations, init_at_random_ep_len=False)
+
+    def save(self, path, infos=None):
+        from dataclasses import asdict
+        super().save(path, {**(infos or {}), 'course_curriculum': asdict(self.course_curriculum)})
+
+    def load(self, *args, **kwargs):
+        from .cliff.course_curriculum import Curriculum
+        infos = super().load(*args, **kwargs)
+        if infos and 'course_curriculum' in infos:
+            self.course_curriculum = Curriculum(**infos['course_curriculum'])
+            cfg = self.env.unwrapped.event_manager.get_term_cfg('course_reset')
+            cfg.params['upper'] = self.course_curriculum.upper_mm / 1000
+        return infos
+
+
+register_mjlab_task(
+    task_id='Mjlab-CliffOracleCourse-MicroDuck',
+    env_cfg=make_microduck_cliff_course_env_cfg(),
+    play_env_cfg=make_microduck_cliff_course_env_cfg(play=True),
+    rl_cfg=MicroduckCliffCourseRlCfg,
+    runner_cls=MicroduckCourseRunner,
+)

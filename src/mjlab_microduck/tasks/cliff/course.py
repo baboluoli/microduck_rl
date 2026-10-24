@@ -1,0 +1,136 @@
+"""Course completion, with tile-relative geometry and control-step cached state.
+
+Metres, seconds and newtons throughout. This experimental task retains the
+63-input oracle interface; it is not a hardware deployment policy.
+"""
+import math
+import torch
+
+HEIGHTS = tuple((40 + i) / 2000 for i in range(21))  # 2–3 cm, 0.5 mm bank
+EDGE = .55
+FINISH = 3.55
+FORWARD_EDGE = 4.05
+SIDE_LIMIT = 1.15
+
+
+def lower_contact(found, positions, origins, heights):
+    p = positions.reshape(len(origins), -1, 3) - origins[:, None, :]
+    return (found.reshape(len(origins), -1).bool() & torch.isfinite(p).all(-1)
+            & (p[..., 0] >= EDGE) & (p[..., 0] <= FORWARD_EDGE)
+            & (p[..., 1].abs() <= 1.35)
+            & ((p[..., 2] + heights[:, None]).abs() <= .008)).any(-1)
+
+
+class CourseState:
+    def __init__(self, n, device):
+        self.last_step = -1
+        for name in ('contact', 'impact', 'tilt', 'nonfinite', 'boundary', 'bad', 'paid', 'pulse'):
+            setattr(self, name, torch.zeros(n, dtype=torch.bool, device=device))
+        self.contact_x = torch.full((n,), float('nan'), device=device)
+
+    def reset(self, ids):
+        for name in ('contact', 'impact', 'tilt', 'nonfinite', 'boundary', 'bad', 'paid', 'pulse'):
+            getattr(self, name)[ids] = False
+        self.contact_x[ids] = float('nan')
+
+    def update(self, *, step, age, x, y, lower, cos_tilt, head, trunk, finite, failure):
+        if self.last_step == step:
+            return self.pulse
+        self.last_step = step
+        self.reset(age <= 1)
+        first = lower & ~self.contact
+        self.contact_x[first] = x[first]
+        self.contact |= lower
+        self.impact |= (head > 15) | (trunk > 20)
+        self.nonfinite |= ~finite
+        # Contact is latched first: tilt on the first touchdown sample counts.
+        self.tilt |= self.contact & (cos_tilt <= math.cos(math.pi / 4))
+        self.boundary |= (x < -.75) | (x > 3.8) | (y.abs() > SIDE_LIMIT)
+        self.bad |= self.impact | self.nonfinite | self.tilt | self.boundary | failure
+        self.pulse = self.contact & (x >= FINISH) & ~self.bad & ~self.paid
+        self.paid |= self.pulse
+        return self.pulse
+
+
+def heights(env):
+    bank = torch.tensor(HEIGHTS, device=env.device)
+    return bank[env.scene.terrain.terrain_levels]
+
+
+def observation(env):
+    x = env.scene['robot'].data.root_link_pos_w[:, 0] - env.scene.env_origins[:, 0]
+    return torch.stack((EDGE - x, heights(env)), -1)
+
+
+def reset(env, env_ids, upper=.02, start_range=(.45, .65), fixed_height=None):
+    """Move the complete reset robot between precompiled tiles, after base reset.
+
+    Geometry stays immutable. Only these episode rows change tile or approach.
+    The ordinary reset has already initialized joint state and root velocity.
+    """
+    if upper not in (.02, .0225, .025, .0275, .03) or fixed_height is not None and fixed_height not in HEIGHTS:
+        raise ValueError('Unsupported course height')
+    terrain = env.scene.terrain
+    old = env.scene.env_origins[env_ids].clone()
+    n = len(env_ids)
+    if fixed_height is not None:
+        levels = torch.full((n,), HEIGHTS.index(fixed_height), device=env.device, dtype=torch.long)
+    else:
+        top = round((upper - .02) * 2000)
+        frontier = torch.randint(max(1, top - 4), max(2, top + 1), (n,), device=env.device)
+        easier = torch.randint(0, max(1, top - 4), (n,), device=env.device)
+        levels = torch.where(torch.rand(n, device=env.device) < .75, frontier, easier) if top else torch.zeros_like(easier)
+    terrain.terrain_levels[env_ids] = levels
+    terrain.env_origins[env_ids] = terrain.terrain_origins[levels, terrain.terrain_types[env_ids]]
+    robot = env.scene['robot']
+    adr = robot.data.indexing.free_joint_q_adr
+    pose = env.sim.data.qpos[env_ids][:, adr].clone()
+    pose[:, :3] += env.scene.env_origins[env_ids] - old
+    distance = torch.empty(n, device=env.device).uniform_(*start_range)
+    pose[:, 0] += EDGE - distance
+    robot.write_root_link_pose_to_sim(pose, env_ids=env_ids)
+    if hasattr(env, '_course'):
+        env._course.reset(env_ids)
+
+
+def update(env):
+    if not hasattr(env, '_course'):
+        env._course = CourseState(env.num_envs, env.device)
+    s = env._course
+    if s.last_step == int(env.common_step_counter):
+        return s
+    d = env.scene['robot'].data
+    p = d.root_link_pos_w - env.scene.env_origins
+    q = d.root_link_quat_w
+    foot = env.scene.sensors['cliff_foot_contact'].data
+    forces = [env.scene.sensors[name].data.force for name in ('head_ground_contact', 'trunk_ground_contact')]
+    values = [p, q, d.root_link_lin_vel_w, d.root_link_ang_vel_w, d.joint_pos, d.joint_vel, env.action_manager.action,
+              foot.pos.reshape(env.num_envs, -1), foot.force.reshape(env.num_envs, -1), *[f.reshape(env.num_envs, -1) for f in forces]]
+    finite = torch.isfinite(torch.cat(values, -1)).all(-1)
+    head, trunk = [torch.linalg.vector_norm(f.sum(1), dim=-1) for f in forces]
+    # Physical guards precede course_success in the configured manager. Read
+    # their current results rather than calling stateful fall timers twice.
+    failure = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    for name in env.termination_manager.active_terms:
+        if name == 'course_success':
+            break
+        cfg = env.termination_manager.get_term_cfg(name)
+        if not cfg.time_out:
+            failure |= env.termination_manager.get_term(name)
+    s.update(step=int(env.common_step_counter), age=env.episode_length_buf,
+             x=p[:, 0], y=p[:, 1], lower=lower_contact(foot.found, foot.pos, env.scene.env_origins, heights(env)),
+             cos_tilt=1-2*(q[:, 1]**2+q[:, 2]**2), head=head, trunk=trunk, finite=finite, failure=failure)
+    return s
+
+
+def success(env):
+    return update(env).pulse.clone()
+
+
+def boundary(env):
+    return update(env).boundary.clone()
+
+
+def reward(env):
+    # Success is itself a termination: masking reset_terminated would erase it.
+    return 80 * update(env).pulse.float() / env.step_dt
