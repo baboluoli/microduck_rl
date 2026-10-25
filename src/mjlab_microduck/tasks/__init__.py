@@ -384,3 +384,16 @@ register_mjlab_task(
     rl_cfg=MicroduckCliffCourseRlCfg,
     runner_cls=MicroduckCourseRunner,
 )
+
+from .cliff.env_cfg import make_microduck_cliff_course_walk_env_cfg, MicroduckCliffCourseWalkRlCfg
+
+# Same course and 63/78/14 interface, trained as plain walking (no finish, no
+# completion credit, 8 s). Evaluate its checkpoints with eval_cliff_course.py,
+# which keeps the 12 s course rule above.
+register_mjlab_task(
+    task_id='Mjlab-CliffOracleCourseWalk-MicroDuck',
+    env_cfg=make_microduck_cliff_course_walk_env_cfg(),
+    play_env_cfg=make_microduck_cliff_course_walk_env_cfg(play=True),
+    rl_cfg=MicroduckCliffCourseWalkRlCfg,
+    runner_cls=MicroduckCourseRunner,
+)

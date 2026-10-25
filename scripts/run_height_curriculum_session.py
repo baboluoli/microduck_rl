@@ -48,8 +48,14 @@ from mjlab_microduck.tasks.cliff import course
 from mjlab_microduck.tasks.cliff.course_curriculum import (
     DISTANCES, REGRESSION_DISTANCE, Curriculum, Result, key)
 
-TASK = 'Mjlab-CliffOracleCourse-MicroDuck'
-ROOT = Path('logs/rsl_rl/oracle_course')
+# Training task -> its rsl_rl log directory (the RL cfg's experiment_name).
+# Evaluation always uses eval_cliff_course.py's fixed 12 s course rule.
+TASKS = {
+    'course': ('Mjlab-CliffOracleCourse-MicroDuck', Path('logs/rsl_rl/oracle_course')),
+    # No finish, no completion credit, velocity tracking, 8 s episodes.
+    'walk': ('Mjlab-CliffOracleCourseWalk-MicroDuck', Path('logs/rsl_rl/oracle_course_walk')),
+}
+TASK, ROOT = TASKS['course']
 DEVELOPMENT_SEEDS = (20, 21, 22)
 CONFIRMATION_SEEDS = (40, 41, 42)
 NAN_DUMPS = Path('/tmp/mjlab/nan_dumps')
@@ -177,7 +183,10 @@ def main():
     p.add_argument('--hold-height', action='store_true',
                    help='Keep the current height: never advance, no stall stop (records would_advance)')
     p.add_argument('--blocks', type=int, default=4, help='With --hold-height: number of blocks to train')
+    p.add_argument('--task', choices=TASKS, default='course', help='Training task (evaluation is unchanged)')
     args = p.parse_args()
+    global TASK, ROOT
+    TASK, ROOT = TASKS[args.task]
     assert sha(args.source) == args.source_sha, 'Source checkpoint sha256 does not match --source-sha'
     # Reserve 15 minutes for retrieval/shutdown; never exceed two hours.
     deadline = min(args.deadline_epoch, time.time() + SESSION_CAP_S) - RETRIEVAL_RESERVE_S
@@ -190,7 +199,7 @@ def main():
         deadline_epoch=args.deadline_epoch, training_seed=42, training_envs=2048,
         block_updates=args.block_updates, max_blocks_per_stage=args.max_blocks_per_stage,
         hold_height=args.hold_height, blocks=args.blocks if args.hold_height else None,
-        distances=DISTANCES, regression_distance=REGRESSION_DISTANCE,
+        task=TASK, distances=DISTANCES, regression_distance=REGRESSION_DISTANCE,
         development_seeds=DEVELOPMENT_SEEDS, confirmation_seeds=CONFIRMATION_SEEDS,
         block_budget_s=BLOCK_BUDGET_S, retrieval_reserve_s=RETRIEVAL_RESERVE_S,
         git_head=os.environ.get('MICRODUCK_GIT_HEAD')), indent=2))

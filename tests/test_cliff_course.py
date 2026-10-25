@@ -293,3 +293,40 @@ def test_sideways_drift_uses_heading_frame_and_resets():
 def test_classifier_goal_matches_training_goal():
     from mjlab_microduck.tasks.cliff import course_evaluation
     assert course_evaluation.GOAL == GOAL == 1.
+
+
+def test_course_walk_config_has_no_finish_and_tracks_velocity():
+    from mjlab_microduck.tasks.cliff.env_cfg import (
+        make_microduck_cliff_course_env_cfg, make_microduck_cliff_course_walk_env_cfg)
+    base, walk = make_microduck_cliff_course_env_cfg(), make_microduck_cliff_course_walk_env_cfg()
+    # No success termination and no completion credit: nothing to stop short of.
+    assert 'course_success' not in walk.terminations and 'cliff_landing' not in walk.rewards
+    assert walk.episode_length_s == 8 and walk.terminations['time_out'].time_out
+    # Failures still end the attempt; the evaluator's course cfg is untouched.
+    assert not walk.terminations['course_boundary'].time_out
+    assert not walk.terminations['cliff_failed_landing'].time_out
+    assert base.episode_length_s == 12 and 'course_success' in base.terminations
+    assert walk.rewards['track_linear_velocity'].func.__name__ == 'track_linear_velocity'
+    assert walk.rewards['forward_progress'].func.__name__ == 'cliff_forward_progress'
+    # Same observations as the course task, so checkpoints are interchangeable.
+    for group in ('actor', 'critic'):
+        assert list(walk.observations[group].terms) == list(base.observations[group].terms)
+
+
+def test_course_walk_reward_peaks_at_commanded_speed():
+    """Speed-dependent part of the walking reward: walking at the command beats
+    standing still AND rushing (the course rule paid rushing for free)."""
+    from types import SimpleNamespace
+    from mjlab_microduck.tasks.cliff.env_cfg import make_microduck_cliff_course_walk_env_cfg
+    rewards = make_microduck_cliff_course_walk_env_cfg().rewards
+    command = torch.tensor([[.2, 0., 0.]])
+    def per_second(vx):
+        data = SimpleNamespace(root_link_lin_vel_b=torch.tensor([[vx, 0., 0.]]),
+                               root_link_lin_vel_w=torch.tensor([[vx, 0., 0.]]),
+                               root_link_quat_w=torch.tensor([[1., 0., 0., 0.]]))
+        env = SimpleNamespace(scene={'robot': SimpleNamespace(data=data)},
+                              command_manager=SimpleNamespace(get_command=lambda name: command))
+        return sum(rewards[n].weight * rewards[n].func(env, **rewards[n].params).item()
+                   for n in ('track_linear_velocity', 'forward_progress'))
+    stand, walk, rush = per_second(0.), per_second(.2), per_second(.6)
+    assert walk > stand + 2 and walk > rush + 1

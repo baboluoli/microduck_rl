@@ -1,6 +1,7 @@
 """Straight approach, unsupported drop, safe landing, and continued walking."""
 
 from copy import deepcopy
+import math
 import os
 
 from mjlab.envs import ManagerBasedRlEnvCfg
@@ -8,6 +9,7 @@ from mjlab.managers import EventTermCfg, ObservationTermCfg, RewardTermCfg, Term
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.rl import RslRlOnPolicyRunnerCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
+from mjlab.tasks.velocity import mdp as velocity_mdp
 from mjlab.terrains import TerrainEntityCfg
 from mjlab.terrains.terrain_generator import TerrainGeneratorCfg
 
@@ -376,3 +378,54 @@ MicroduckCliffCourseRlCfg.run_name = 'oracle_course'
 # the action std every 100-update block (0.96 -> 1.43 over the 2026-10-25
 # height session) while walking degraded. Weaker bonus, course task only.
 MicroduckCliffCourseRlCfg.algorithm.entropy_coef = 0.003
+
+
+def make_microduck_cliff_course_walk_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+    """Course terrain and starts, but trained as plain walking: no finish, no completion credit.
+
+    Why (hold-height session, 2026-10-25): standing upright earns ~3 points/s
+    (upright, head_pose_tracking, pose, air_time). When success ENDS the episode,
+    that income stops, so the last few centimetres before the goal are worth
+    less than standing still. With 80 points/m and gamma 0.99 at 50 Hz the
+    break-even is ~8 cm, and the policy loitered 6–8 cm short of the 1 m goal.
+    Paying distance (not walking) also made rushing free: 0.6 m/s against a
+    0.18–0.3 m/s command.
+
+    So here the cliff is just terrain on a walk:
+    - no success termination: every attempt runs to the (bootstrapped) timeout,
+      so there is no end worth avoiding;
+    - no completion credit: the 80-point course budget is removed;
+    - the walking task's velocity tracking is back. Its exp kernel peaks at the
+      commanded speed and charges overspeed and sideways motion, which the
+      capped progress term never did.
+
+    Success (1 m clean walking after touchdown) stays an evaluation metric:
+    ``scripts/eval_cliff_course.py`` still uses the 12 s course cfg above.
+    Same 63/78/14 interface, so checkpoints move freely between the two tasks.
+    """
+    cfg = make_microduck_cliff_course_env_cfg(play)
+    # Episodes no longer stop at the goal, so 12 s is mostly flat walking after
+    # the landing. 8 s still leaves ~5 s after touchdown from the farthest 65 cm
+    # start at the commanded ~0.21 m/s, and gives ~1.5x more landings per step.
+    cfg.episode_length_s = 8.
+    cfg.terminations.pop('course_success')
+    cfg.rewards.pop('cliff_landing')
+    # The steering profile renamed capped world-X progress to this slot. Keep it,
+    # at half weight, so standing at the edge still pays less than stepping off;
+    # it pays nothing above the command, and the tracker below charges for that.
+    progress = cfg.rewards.pop('track_linear_velocity')
+    progress.weight = 2.
+    cfg.rewards['forward_progress'] = progress
+    # Same term and settings as microduck_velocity_env_cfg (weight 2, std^2 0.1):
+    # at a 0.2 m/s command, 0.6 m/s earns exp(-0.16/0.1) = 20% of the peak.
+    cfg.rewards['track_linear_velocity'] = RewardTermCfg(
+        func=velocity_mdp.track_linear_velocity,
+        weight=2.,
+        params={'command_name': 'twist', 'std': math.sqrt(0.1)},
+    )
+    return cfg
+
+
+MicroduckCliffCourseWalkRlCfg = deepcopy(MicroduckCliffCourseRlCfg)
+MicroduckCliffCourseWalkRlCfg.experiment_name = 'oracle_course_walk'
+MicroduckCliffCourseWalkRlCfg.run_name = 'oracle_course_walk'
