@@ -65,7 +65,10 @@ places. All three have to change, plus a new runner.
 - `HEIGHTS` is the set of precompiled terrain rows (one row per height). Keep
   the existing 20–30 mm rows at 0.5 mm unchanged, so old checkpoints' row
   indices and `course_height_counts` stay meaningful. Append 31–100 mm at 1 mm.
-  That is 21 + 70 = **91 rows**. Build them from integer tenths of a mm, so
+  That is 21 + 70 = **91 rows**.
+  *Changed 2026-10-25 (user decision):* above 3 cm the spacing is **2.5 mm**
+  (32.5–100 mm), so **49 rows**. Every row is a real tile in every simulated
+  world (×20 columns), and 91 rows risked slowing training. Build them from integer tenths of a mm, so
   `.0225` and friends compare exactly, as they do today.
 - Add `STAGES = (.02, .0225, .025, .03, .035, .04, .05, .06, .07, .08, .09, .10)`.
 - `reset(upper=…)`: accept any `upper` in `STAGES`, not the hard-coded

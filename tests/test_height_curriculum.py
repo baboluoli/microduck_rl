@@ -23,7 +23,7 @@ PASS, FAIL = Result((22, 22, 22), 0, 72), Result((15, 15, 15), 0, 60)
 
 
 def test_bank_keeps_old_rows_and_contains_every_stage():
-    assert len(HEIGHTS) == 91
+    assert len(HEIGHTS) == 49
     assert HEIGHTS[:21] == tuple((40 + i) / 2000 for i in range(21))  # Original rows unchanged.
     assert all(s in HEIGHTS for s in STAGES) and HEIGHTS[-1] == STAGES[-1] == .10
     assert all(b > a for a, b in zip(HEIGHTS, HEIGHTS[1:]))

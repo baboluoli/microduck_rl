@@ -10,8 +10,10 @@ import torch
 # a millimetre so that literals such as .0225 or .035 compare exactly. The
 # original 2–3 cm rows at 0.5 mm come first and never move: old checkpoints'
 # row indices and saved ``course_height_counts`` keep their meaning. Taller
-# drops, 31–100 mm, are appended at 1 mm (91 rows in total).
-HEIGHTS = tuple(t / 10000 for t in (*range(200, 301, 5), *range(310, 1001, 10)))
+# drops, 32.5–100 mm, are appended at 2.5 mm (49 rows in total). Every row is
+# a real terrain tile in every simulated world, so the bank is kept small:
+# 2.5 mm still leaves 2–4 practice heights inside each stage's band.
+HEIGHTS = tuple(t / 10000 for t in (*range(200, 301, 5), *range(325, 1001, 25)))
 # Curriculum ladder. Each step is roughly 15–25% harder than the one before;
 # fixed 0.25 cm steps would be tiny near 10 cm and need 32 stages.
 STAGES = (.02, .0225, .025, .03, .035, .04, .05, .06, .07, .08, .09, .10)
