@@ -124,7 +124,9 @@ def evaluate(checkpoint, *, height, distance, seed, output, device='cuda:0', vid
             contributions = torch.tensor(rewards[i]).sum(0).tolist()
             audit = dict(zip(terms,contributions))
             # Pay-as-you-go completion credit: never negative, never above the budget.
-            assert -1e-5 <= audit['cliff_landing'] <= course.COMPLETION_POINTS + 1e-4, audit['cliff_landing']
+            # Relative slack: a fully paid metre is a float32 sum over hundreds of
+            # steps and can land a few ppm above the budget (80.00016 seen).
+            assert -1e-5 <= audit['cliff_landing'] <= course.COMPLETION_POINTS * (1 + 1e-4), audit['cliff_landing']
             for name,term in cfg.rewards.items():
                 if term.weight < 0:
                     assert audit[name] <= 1e-5, (name,audit[name])
