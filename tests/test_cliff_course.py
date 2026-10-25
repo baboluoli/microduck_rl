@@ -330,3 +330,26 @@ def test_course_walk_reward_peaks_at_commanded_speed():
                    for n in ('track_linear_velocity', 'forward_progress'))
     stand, walk, rush = per_second(0.), per_second(.2), per_second(.6)
     assert walk > stand + 2 and walk > rush + 1
+
+
+def test_course_walk_keeps_walking_schedules_for_scratch_training():
+    from mjlab_microduck.tasks.microduck_velocity_env_cfg import MicroduckRlCfg, make_microduck_velocity_env_cfg
+    from mjlab_microduck.tasks.cliff.env_cfg import (
+        COURSE_WALK_CURRICULA, MicroduckCliffCourseWalkRlCfg, make_microduck_cliff_course_walk_env_cfg)
+    walking, walk = make_microduck_velocity_env_cfg(), make_microduck_cliff_course_walk_env_cfg()
+    # The course commands forward walking only; every other walking schedule is back.
+    assert set(walk.curriculum) == set(walking.curriculum) - {'standing_envs'} == set(COURSE_WALK_CURRICULA)
+    for name in COURSE_WALK_CURRICULA:
+        assert repr(walk.curriculum[name].params) == repr(walking.curriculum[name].params)
+    stages = walk.curriculum['action_rate_weight'].params['weight_stages']
+    assert walk.rewards['action_rate_l2'].weight == stages[0]['weight'] and stages[-1]['weight'] == -1.
+    assert MicroduckCliffCourseWalkRlCfg.algorithm.entropy_coef == MicroduckRlCfg.algorithm.entropy_coef
+
+
+def test_course_walk_runner_keeps_random_episode_ages(monkeypatch):
+    from mjlab_microduck.tasks import MicroduckCourseRunner, MicroduckCourseWalkRunner, MicroduckOnPolicyRunner
+    seen = []
+    monkeypatch.setattr(MicroduckOnPolicyRunner, 'learn', lambda self, n, init_at_random_ep_len=False: seen.append(init_at_random_ep_len))
+    MicroduckCourseWalkRunner.learn(object.__new__(MicroduckCourseWalkRunner), 1, init_at_random_ep_len=True)
+    MicroduckCourseRunner.learn(object.__new__(MicroduckCourseRunner), 1, init_at_random_ep_len=True)
+    assert seen == [True, False]  # The scored course task keeps full first attempts.

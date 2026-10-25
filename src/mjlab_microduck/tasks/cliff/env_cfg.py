@@ -423,9 +423,30 @@ def make_microduck_cliff_course_walk_env_cfg(play: bool = False) -> ManagerBased
         weight=2.,
         params={'command_name': 'twist', 'std': math.sqrt(0.1)},
     )
+    # This task is trained FROM SCRATCH, so give it the walking recipe's
+    # schedules back. make_microduck_cliff_drop_env_cfg froze them at their
+    # stage-0 values for warm-started height stages; that left smoothing
+    # (action_rate_l2) at -0.1 for every cliff run, 10x weaker than the -1.0
+    # the source walking policy was trained under. ``standing_envs`` stays off:
+    # the course commands forward walking only.
+    walking = make_microduck_velocity_env_cfg(play=play, rough=False)
+    for name in COURSE_WALK_CURRICULA:
+        cfg.curriculum[name] = deepcopy(walking.curriculum[name])
+    for name in ('action_rate_l2', 'head_pose_bias'):  # Stage-0 weights the schedules ramp from.
+        cfg.rewards[name].weight = walking.rewards[name].weight
+    for name in ('randomize_com', 'randomize_head_com'):  # The CoM schedules widen these.
+        cfg.events[name].params['ranges'] = walking.events[name].params['ranges']
     return cfg
+
+
+COURSE_WALK_CURRICULA = ('action_rate_weight', 'com_range', 'head_com_range',
+                         'head_pose_range', 'body_pose_range', 'head_pose_bias_weight')
 
 
 MicroduckCliffCourseWalkRlCfg = deepcopy(MicroduckCliffCourseRlCfg)
 MicroduckCliffCourseWalkRlCfg.experiment_name = 'oracle_course_walk'
 MicroduckCliffCourseWalkRlCfg.run_name = 'oracle_course_walk'
+# The course task's 0.003 curbed action-std creep while FINE-TUNING. From
+# scratch the gait must first be discovered: use the walking recipe's 0.01.
+MicroduckCliffCourseWalkRlCfg.algorithm.entropy_coef = MicroduckRlCfg.algorithm.entropy_coef
+MicroduckCliffCourseWalkRlCfg.max_iterations = 3000

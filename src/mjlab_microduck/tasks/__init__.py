@@ -387,13 +387,25 @@ register_mjlab_task(
 
 from .cliff.env_cfg import make_microduck_cliff_course_walk_env_cfg, MicroduckCliffCourseWalkRlCfg
 
-# Same course and 63/78/14 interface, trained as plain walking (no finish, no
-# completion credit, 8 s). Evaluate its checkpoints with eval_cliff_course.py,
-# which keeps the 12 s course rule above.
+
+class MicroduckCourseWalkRunner(MicroduckCourseRunner):
+    """Course runner without the synchronized starts.
+
+    Training attempts are not measured here (eval_cliff_course.py does that),
+    so keep mjlab's random initial episode ages, as the walking task does:
+    otherwise every robot resets at the same moment, all batch after batch.
+    """
+    def learn(self, num_learning_iterations, init_at_random_ep_len=False):
+        return MicroduckOnPolicyRunner.learn(self, num_learning_iterations, init_at_random_ep_len)
+
+
+# Same course and 63/78/14 interface, trained from scratch as plain walking (no
+# finish, no completion credit, 8 s, walking schedules). Evaluate its
+# checkpoints with eval_cliff_course.py, which keeps the 12 s course rule above.
 register_mjlab_task(
     task_id='Mjlab-CliffOracleCourseWalk-MicroDuck',
     env_cfg=make_microduck_cliff_course_walk_env_cfg(),
     play_env_cfg=make_microduck_cliff_course_walk_env_cfg(play=True),
     rl_cfg=MicroduckCliffCourseWalkRlCfg,
-    runner_cls=MicroduckCourseRunner,
+    runner_cls=MicroduckCourseWalkRunner,
 )
