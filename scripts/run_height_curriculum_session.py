@@ -1,0 +1,338 @@
+"""Gated height curriculum toward 10 cm, on an approved, preflighted pod.
+
+Does not provision a pod. An external watchdog must still stop the pod if this
+process or SSH dies.
+
+What one session does:
+
+1. GPU runtime tests, then a 5-update smoke run at 64 envs plus ONNX export,
+   with the curriculum staged at its current top height.
+2. A loop of 100-update training blocks (2048 envs, seed 42). After every
+   block a fixed-cost check runs on development seeds 20–22:
+   - frontier: the current top height at starts 45/55/65 cm;
+   - regression: 2 cm at 55 cm, plus the previous stage at 55 cm.
+   If the whole frontier passes, a confirmation repeats it on seeds 40–42.
+   Passing both raises the height one stage (``course.STAGES``) and records
+   the checkpoint as ``best`` for the stage it just mastered.
+3. Stops at the last stage, when a regression condition fails two checks in
+   a row, when a stage is still not passed after ``--max-blocks-per-stage``
+   blocks (a stall), or when there is not enough time left for another block
+   plus its checks (``provisional.json``).
+
+After every check it saves ``curriculum.json`` and ``selection.json`` and
+appends one line to ``stages.jsonl``. The next session continues from those.
+Training time alone never raises the height.
+"""
+import argparse
+from dataclasses import asdict
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import signal
+import subprocess
+import time
+
+from mjlab_microduck.tasks.cliff import course
+from mjlab_microduck.tasks.cliff.course_curriculum import (
+    DISTANCES, REGRESSION_DISTANCE, Curriculum, Result, key)
+
+TASK = 'Mjlab-CliffOracleCourse-MicroDuck'
+ROOT = Path('logs/rsl_rl/oracle_course')
+DEVELOPMENT_SEEDS = (20, 21, 22)
+CONFIRMATION_SEEDS = (40, 41, 42)
+NAN_DUMPS = Path('/tmp/mjlab/nan_dumps')
+STEPS_PER_UPDATE = 24  # NUM_STEPS_PER_ENV: env steps per PPO update.
+# Measured on an A40 (2026-10-24): 100 updates ~4.5 min, development check
+# (5 conditions x 3 seeds) ~8 min, confirmation (3 x 3) ~5 min. Do not start
+# a block that cannot finish together with both checks.
+BLOCK_BUDGET_S = 17 * 60
+RETRIEVAL_RESERVE_S = 15 * 60
+SESSION_CAP_S = 2 * 3600
+
+
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def sampled_bands(counts, upper):
+    """Share of reset samples in the frontier band, and samples above the stage.
+
+    ``counts`` is the per-row histogram the runner prints at each save. Any
+    sample above the current top height means the sampler or the restored
+    curriculum state is wrong.
+    """
+    easier_end, frontier_end = course.bands(upper)
+    total = sum(counts)
+    frontier = sum(counts[easier_end:frontier_end])
+    return dict(frontier_share=frontier / total if total else None,
+                above_stage=sum(counts[frontier_end:]), total=total)
+
+
+def run_blocks(state, *, train_block, check, confirm, now, deadline, record,
+               max_blocks_per_stage=5, block_budget_s=BLOCK_BUDGET_S):
+    """The block loop: train, check, maybe confirm and advance, decide to stop.
+
+    Pure decision logic. ``train_block(block, warm)`` returns a checkpoint,
+    ``check(checkpoint)`` returns development results (frontier + regression),
+    ``confirm(checkpoint)`` the frontier on confirmation seeds. ``record`` is
+    called after every check with the entry to save. Returns the stop reason.
+    """
+    block = 0
+    while True:
+        if deadline - now() < block_budget_s:
+            return 'time budget'
+        block += 1
+        checkpoint = train_block(block, warm=block == 1)
+        state.blocks_at_stage += 1
+        upper_mm = state.upper_mm
+        development = check(checkpoint)
+        regressed = state.regression(development)
+        frontier_passed = all(development[k].passes for k in state.frontier())
+        confirmation, advanced = None, False
+        if frontier_passed and not regressed:
+            confirmation = confirm(checkpoint)
+            advanced = state.advance(development, confirmation, str(checkpoint))
+        mastered = state.mastered
+        entry = dict(block=block, checkpoint=str(checkpoint), upper_mm=upper_mm,
+                     blocks_at_stage=state.blocks_at_stage if not advanced else
+                     state.history[-1]['blocks'],
+                     development={k: asdict(v) for k, v in development.items()},
+                     development_passes={k: v.passes for k, v in development.items()},
+                     regression_streaks=dict(state.regression_streaks),
+                     confirmation=None if confirmation is None else
+                     {k: asdict(v) for k, v in confirmation.items()},
+                     confirmation_passes=None if confirmation is None else
+                     {k: v.passes for k, v in confirmation.items()},
+                     advanced=advanced, mastered_stage=advanced or mastered,
+                     next_upper_mm=state.upper_mm, at_unix=now())
+        record(entry, checkpoint, passed_stage=upper_mm if advanced or mastered else None)
+        if regressed:
+            return 'regression'
+        if mastered:
+            return 'last stage mastered'
+        if not advanced and state.stalled(max_blocks_per_stage):
+            return 'stall'
+
+
+def results(directory, heights, distances, seeds):
+    """Read eval_cliff_course.py output into one Result per height/distance."""
+    batch = {}
+    for h in heights:
+        for d in distances:
+            groups = [json.loads((directory / f'h{h:.4f}-d{d:.2f}-s{s}.json').read_text()) for s in seeds]
+            assert all(len(g) == 24 for g in groups), directory
+            if any('nonfinite' in r['events'] for g in groups for r in g):
+                raise RuntimeError(f'Nonfinite evaluation state in {directory}')
+            batch[key(round(h * 1000, 1), round(d * 100))] = Result(
+                tuple(sum(r['success'] for r in g) for g in groups),
+                sum('impact' in r['events'] for g in groups for r in g),
+                sum(r['one_metre'] for g in groups for r in g))
+    return batch
+
+
+def main():
+    import torch
+
+    from cliff_course_process import wait_checked
+
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument('--source', type=Path, required=True, help='Checkpoint to continue (e.g. drift-penalty model_99.pt)')
+    p.add_argument('--source-sha', required=True, help='Expected sha256 of --source; asserted')
+    p.add_argument('--curriculum', type=Path, required=True, help='curriculum.json saved by the previous session')
+    p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--deadline-epoch', type=float, required=True, help='Absolute approved deadline, including retrieval')
+    p.add_argument('--max-nan-resets', type=int, default=5,
+                   help='Training NaN events tolerated per block (the guard resets the broken env)')
+    p.add_argument('--label', default='height-curriculum', help='Training run label prefix')
+    p.add_argument('--block-updates', type=int, default=100)
+    p.add_argument('--max-blocks-per-stage', type=int, default=5)
+    args = p.parse_args()
+    assert sha(args.source) == args.source_sha, 'Source checkpoint sha256 does not match --source-sha'
+    # Reserve 15 minutes for retrieval/shutdown; never exceed two hours.
+    deadline = min(args.deadline_epoch, time.time() + SESSION_CAP_S) - RETRIEVAL_RESERVE_S
+    state = Curriculum.load(args.curriculum)
+    args.output.mkdir(parents=True, exist_ok=False)
+    (args.output / 'session.json').write_text(json.dumps(dict(
+        source=str(args.source), source_sha256=args.source_sha, curriculum=str(args.curriculum),
+        starting_upper_mm=state.upper_mm, starting_blocks_at_stage=state.blocks_at_stage,
+        stages=course.STAGES, max_nan_resets=args.max_nan_resets, label=args.label,
+        deadline_epoch=args.deadline_epoch, training_seed=42, training_envs=2048,
+        block_updates=args.block_updates, max_blocks_per_stage=args.max_blocks_per_stage,
+        distances=DISTANCES, regression_distance=REGRESSION_DISTANCE,
+        development_seeds=DEVELOPMENT_SEEDS, confirmation_seeds=CONFIRMATION_SEEDS,
+        block_budget_s=BLOCK_BUDGET_S, retrieval_reserve_s=RETRIEVAL_RESERVE_S,
+        git_head=os.environ.get('MICRODUCK_GIT_HEAD')), indent=2))
+    (args.output / 'source.diff').write_bytes(subprocess.run(
+        ['git', 'diff', 'HEAD'], capture_output=True).stdout)
+    environment = dict(os.environ, MUJOCO_GL='egl', PYOPENGL_PLATFORM='egl', WANDB_MODE='offline', PYTHONUNBUFFERED='1')
+
+    def command(cmd, label, warm=False, max_nan_resets=0):
+        if time.time() >= deadline:
+            raise TimeoutError('Retrieval reserve reached')
+        log_path = args.output / f'{label}.log'
+        with log_path.open('w') as log:
+            process = subprocess.Popen(['uv', 'run', *cmd], stdout=log, stderr=subprocess.STDOUT,
+                env=dict(environment, MICRODUCK_WARM_START='1' if warm else '0'), start_new_session=True)
+            try:
+                code = wait_checked(process, log_path, deadline, max_nan_resets)
+                if code:
+                    raise RuntimeError(f'{label} exit {code}')
+            finally:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGTERM)
+                    try:
+                        process.wait(timeout=30)  # Let forensics finish writing.
+                    except subprocess.TimeoutExpired:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.wait()
+        text = log_path.read_text()
+        if re.search(r'(?i)(loss|reward)[^\n]{0,80}\b(?:nan|inf)\b', text):
+            raise RuntimeError('Nonfinite losses or rewards')
+        if not max_nan_resets and '[NanGuard] NaN/Inf found' in text:
+            raise RuntimeError('Nonfinite training state')
+        return text
+
+    count = 0
+
+    def evaluate(checkpoint, heights, distances, seeds, kind):
+        nonlocal count
+        count += 1
+        directory = args.output / f'eval-{count:03}-{kind}'
+        command(['python', 'scripts/eval_cliff_course.py', str(checkpoint), '--output', str(directory),
+                 '--heights', *map(str, heights), '--distances', *map(str, distances),
+                 '--seeds', *map(str, seeds)], directory.name)
+        return results(directory, heights, distances, seeds)
+
+    def check(checkpoint):
+        upper = state.upper_mm / 1000
+        batch = evaluate(checkpoint, [upper], [d / 100 for d in DISTANCES], DEVELOPMENT_SEEDS, 'frontier')
+        regression = [round(float(k.split('/')[0]) / 1000, 4) for k in state.regression_conditions()]
+        batch.update(evaluate(checkpoint, regression, [REGRESSION_DISTANCE / 100], DEVELOPMENT_SEEDS, 'regression'))
+        return batch
+
+    def confirm(checkpoint):
+        return evaluate(checkpoint, [state.upper_mm / 1000], [d / 100 for d in DISTANCES],
+                        CONFIRMATION_SEEDS, 'confirmation')
+
+    ROOT.mkdir(parents=True, exist_ok=True)
+    source_dir = ROOT / f'{args.label}-source'
+    source_dir.mkdir(exist_ok=False)
+    copied = source_dir / 'model_source.pt'
+    shutil.copy2(args.source, copied)
+
+    def stage(checkpoint, iteration):
+        """Stage a checkpoint with the CURRENT curriculum state and step counter.
+
+        The training process restores ``course_curriculum`` on load, which is
+        how a raised height reaches the sampler. ``common_step_counter`` keeps
+        step-based schedules consistent with the cumulative iteration.
+        """
+        payload = torch.load(checkpoint, map_location='cpu', weights_only=False)
+        payload['iter'] = iteration
+        payload['infos'] = dict(payload.get('infos') or {})
+        payload['infos']['course_curriculum'] = asdict(state)
+        payload['infos']['env_state'] = {'common_step_counter': iteration * STEPS_PER_UPDATE}
+        torch.save(payload, source_dir / 'model_staged.pt')
+
+    def train(checkpoint, iteration, updates, envs, label, warm, max_nan_resets=0):
+        stage(checkpoint, iteration)
+        text = command(['train', TASK, '--env.scene.num-envs', str(envs), '--agent.max-iterations', str(updates),
+            '--agent.save-interval', '100', '--agent.seed', '42', '--agent.run-name', label,
+            '--agent.resume', 'True', '--agent.load-run', source_dir.name,
+            '--agent.load-checkpoint', 'model_staged.pt', '--enable-nan-guard', 'True'], label, warm=warm,
+            max_nan_resets=max_nan_resets)
+        assert 'Loading model checkpoint from:' in text
+        if warm:
+            assert 'weights/normalizer/optimizer kept' in text
+        # The last "[course] Actual sampled height counts" line must fit the stage.
+        lines = re.findall(r'\[course\] Actual sampled height counts[^:]*: (\[[^\]]*\])', text)
+        bands = sampled_bands(json.loads(lines[-1]), state.upper_mm / 1000) if lines else None
+        if bands and bands['above_stage']:
+            raise RuntimeError(f'{label} sampled heights above the current stage: {bands}')
+        directory = sorted(ROOT.glob(f'*_{label}'))[-1]
+        return max(directory.glob('model_*.pt'), key=lambda q: int(q.stem.split('_')[-1])), bands
+
+    selection = dict(best=None, best_upper_mm=None, mastered={}, last=None,
+                     upper_mm=state.upper_mm, blocks_at_stage=state.blocks_at_stage)
+    sampling = {}
+
+    def save():
+        state.save(args.output / 'curriculum.json')
+        selection.update(upper_mm=state.upper_mm, blocks_at_stage=state.blocks_at_stage)
+        (args.output / 'selection.json').write_text(json.dumps(selection, indent=2))
+
+    def record(entry, checkpoint, passed_stage):
+        entry['sampled_bands'] = sampling.get(entry['block'])
+        selection['last'] = str(checkpoint)
+        if passed_stage is not None:
+            selection.update(best=str(checkpoint), best_upper_mm=passed_stage)
+            selection['mastered'][f'{passed_stage:g}'] = dict(checkpoint=str(checkpoint), sha256=sha(checkpoint))
+        save()
+        with (args.output / 'stages.jsonl').open('a') as f:
+            f.write(json.dumps(entry) + '\n')
+        print(f"[height-curriculum] block {entry['block']} at {entry['upper_mm']:g} mm: "
+              f"advanced={entry['advanced']} next={entry['next_upper_mm']:g} mm "
+              f"dev={entry['development_passes']} confirm={entry['confirmation_passes']}", flush=True)
+
+    previous = dict(checkpoint=copied, iteration=0)
+
+    def train_block(block, warm):
+        # The first block warm-starts the source (step counter restarts at 0,
+        # weights/normalizer/optimizer kept). Later blocks resume the previous
+        # block at its cumulative iteration, staged with the current state.
+        label = f'{args.label}-b{block:02}'
+        checkpoint, bands = train(previous['checkpoint'], previous['iteration'], args.block_updates, 2048,
+                                  label, warm, args.max_nan_resets)
+        sampling[block] = bands
+        (args.output / f'{label}.json').write_text(json.dumps(dict(
+            checkpoint=str(checkpoint), sha256=sha(checkpoint), upper_mm=state.upper_mm, sampled_bands=bands)))
+        previous.update(checkpoint=checkpoint, iteration=previous['iteration'] + args.block_updates)
+        return checkpoint
+
+    try:
+        command(['--with', 'pytest', 'pytest', 'tests/test_cliff_course.py', 'tests/test_nan_forensics.py', '-q'],
+                'runtime-tests')
+        smoke, _ = train(copied, 0, 5, 64, f'{args.label}-smoke', warm=True)
+        command(['python', 'scripts/export.py', TASK, '--checkpoint-file', str(smoke),
+                 '--num-envs', '1', '--onnx-file', str(args.output / 'smoke.onnx')], 'smoke-export')
+        import numpy as np
+        import onnx
+        import onnxruntime as ort
+        graph = onnx.load(str(args.output / 'smoke.onnx')).graph
+        assert any(node.op_type == 'Sub' for node in graph.node), 'Missing normalizer centering'
+        assert any(node.op_type in ('Div', 'Mul') for node in graph.node), 'Missing normalizer scaling'
+        model = ort.InferenceSession(str(args.output / 'smoke.onnx'), providers=['CPUExecutionProvider'])
+        output = model.run(None, {model.get_inputs()[0].name: np.zeros((1, 63), dtype=np.float32)})[0]
+        assert output.shape == (1, 14) and np.isfinite(output).all()
+        save()
+        reason = run_blocks(state, train_block=train_block, check=check, confirm=confirm, now=time.time,
+                            deadline=deadline, record=record, max_blocks_per_stage=args.max_blocks_per_stage)
+        if reason == 'time budget':
+            (args.output / 'provisional.json').write_text(json.dumps(dict(
+                checkpoint=selection['last'], reason='Not enough time for another block plus checks',
+                at_unix=time.time())))
+        (args.output / 'complete.json').write_text(json.dumps(dict(
+            reason=reason, upper_mm=state.upper_mm, best=selection['best'], last=selection['last'],
+            finished_unix=time.time())))
+    except TimeoutError as error:
+        (args.output / 'provisional.json').write_text(json.dumps(dict(
+            checkpoint=selection['last'], reason=repr(error), at_unix=time.time())))
+        raise
+    except Exception as error:
+        (args.output / 'stopped.json').write_text(json.dumps(dict(reason=repr(error), at_unix=time.time())))
+        raise
+    finally:
+        save()
+        if NAN_DUMPS.exists():
+            shutil.copytree(NAN_DUMPS, args.output / 'nan-dumps', symlinks=True, dirs_exist_ok=True)
+        files = [q for q in args.output.rglob('*') if q.is_file() and not q.is_symlink()]
+        files += [q for d in ROOT.glob(f'*{args.label}*') for q in d.rglob('*') if q.is_file()]
+        (args.output / 'SHA256SUMS').write_text(''.join(
+            f'{sha(q)}  {q}\n' for q in files if q.name != 'SHA256SUMS'))
+
+
+if __name__ == '__main__':
+    main()

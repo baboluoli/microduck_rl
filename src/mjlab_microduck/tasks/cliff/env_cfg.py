@@ -339,7 +339,7 @@ MicroduckCliffWalkThroughRlCfg.run_name = 'oracle_walkthrough_fixed'
 
 
 def make_microduck_cliff_course_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
-    """Fixed finish, immutable 0.5 mm height bank, randomized approach only."""
+    """Fixed finish, immutable height bank (2–3 cm at 0.5 mm, 3.1–10 cm at 1 mm), randomized approach only."""
     from . import course
     cfg = make_microduck_cliff_oracle_env_cfg(play)
     cfg.episode_length_s = 12.

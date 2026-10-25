@@ -6,7 +6,15 @@ Metres, seconds and newtons throughout. This experimental task retains the
 import math
 import torch
 
-HEIGHTS = tuple((40 + i) / 2000 for i in range(21))  # 2–3 cm, 0.5 mm bank
+# Precompiled terrain rows, one per drop height. Built from integer tenths of
+# a millimetre so that literals such as .0225 or .035 compare exactly. The
+# original 2–3 cm rows at 0.5 mm come first and never move: old checkpoints'
+# row indices and saved ``course_height_counts`` keep their meaning. Taller
+# drops, 31–100 mm, are appended at 1 mm (91 rows in total).
+HEIGHTS = tuple(t / 10000 for t in (*range(200, 301, 5), *range(310, 1001, 10)))
+# Curriculum ladder. Each step is roughly 15–25% harder than the one before;
+# fixed 0.25 cm steps would be tiny near 10 cm and need 32 stages.
+STAGES = (.02, .0225, .025, .03, .035, .04, .05, .06, .07, .08, .09, .10)
 EDGE = .55
 FINISH = 3.55
 FORWARD_EDGE = 4.05
@@ -62,24 +70,46 @@ def observation(env):
     return torch.stack((EDGE - x, heights(env)), -1)
 
 
+def bands(upper):
+    """Row index ranges ``(easier_end, frontier_end)`` for a curriculum stage.
+
+    Frontier rows are the heights newly unlocked by this stage
+    (previous stage < h <= upper), i.e. rows ``easier_end .. frontier_end-1``.
+    Easier rows are everything up to and including the previous stage,
+    rows ``0 .. easier_end-1``. At the first stage (2 cm) there is no frontier.
+    """
+    if upper not in STAGES:
+        raise ValueError('Unsupported course height')
+    stage = STAGES.index(upper)
+    if stage == 0:
+        return 1, 1
+    previous = STAGES[stage - 1]
+    return (sum(h <= previous for h in HEIGHTS), sum(h <= upper for h in HEIGHTS))
+
+
 def reset(env, env_ids, upper=.02, start_range=(.45, .65), fixed_height=None):
     """Move the complete reset robot between precompiled tiles, after base reset.
 
     Geometry stays immutable. Only these episode rows change tile or approach.
     The ordinary reset has already initialized joint state and root velocity.
     """
-    if upper not in (.02, .0225, .025, .0275, .03) or fixed_height is not None and fixed_height not in HEIGHTS:
+    if fixed_height is not None and fixed_height not in HEIGHTS:
         raise ValueError('Unsupported course height')
+    easier_end, frontier_end = bands(upper)
     terrain = env.scene.terrain
     old = env.scene.env_origins[env_ids].clone()
     n = len(env_ids)
     if fixed_height is not None:
         levels = torch.full((n,), HEIGHTS.index(fixed_height), device=env.device, dtype=torch.long)
     else:
-        top = round((upper - .02) * 2000)
-        frontier = torch.randint(max(1, top - 4), max(2, top + 1), (n,), device=env.device)
-        easier = torch.randint(0, max(1, top - 4), (n,), device=env.device)
-        levels = torch.where(torch.rand(n, device=env.device) < .75, frontier, easier) if top else torch.zeros_like(easier)
+        # 75% of resets practise the newly unlocked heights, 25% revisit the
+        # easier ones so they are not forgotten. Rows are sampled uniformly
+        # inside each band. The call order matches the original 2–3 cm sampler,
+        # so stage .0225 draws exactly the same rows for the same RNG state.
+        frontier = torch.randint(easier_end, max(easier_end + 1, frontier_end), (n,), device=env.device)
+        easier = torch.randint(0, easier_end, (n,), device=env.device)
+        levels = (torch.where(torch.rand(n, device=env.device) < .75, frontier, easier)
+                  if frontier_end > easier_end else torch.zeros_like(easier))
     # Keep a cumulative histogram of actual reset samples. The runner saves
     # these counts with each checkpoint, so the sampler can be audited later.
     if not hasattr(env, '_course_height_counts'):

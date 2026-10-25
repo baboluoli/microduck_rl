@@ -2,7 +2,7 @@
 import math
 import pytest
 import torch
-from mjlab_microduck.tasks.cliff.course import CourseState, lower_contact, HEIGHTS, FINISH
+from mjlab_microduck.tasks.cliff.course import CourseState, lower_contact, HEIGHTS, STAGES, FINISH
 from mjlab_microduck.tasks.cliff.course_curriculum import Curriculum, Result, rank
 
 
@@ -64,13 +64,15 @@ def test_gates_persistence_regression(tmp_path):
     batch = {k:Result((22,22,22), 2, 68) for k in c.conditions()}
     assert c.advance(batch, batch, 'source-sha')
     assert c.upper_mm == 22.5
-    bad = {k:Result((18,18,18), 2, 60) for k in batch}
+    # Regression now means "fails the gate" on 2 cm or the previous stage.
+    bad = {k:Result((18,18,18), 2, 60) for k in c.conditions()}
     assert not c.regression(bad)
     path = tmp_path/'state.json'
     c.save(path)
     c = Curriculum.load(path)
     assert c.regression(bad)
-    assert not c.regression(batch)
+    good = {k:Result((22,22,22), 2, 68) for k in c.conditions()}
+    assert not c.regression(good)
     with pytest.raises(ValueError): c.advance({}, {}, 'incomplete')
     assert rank([Result((22,22,22),1,67)]) > rank([Result((22,22,22),2,72)])
 
@@ -120,7 +122,7 @@ def test_cuda_course_reset_geometry(play):
     cfg.scene.num_envs = 8
     env = ManagerBasedRlEnv(cfg,device='cuda:0')
     try:
-        for height in (.02,.0225,.025,.0275,.03):
+        for height in STAGES:
             for distance in (.45,.55,.65):
                 env.event_manager.get_term_cfg('course_reset').params.update(fixed_height=height,start_range=(distance,distance))
                 env.reset(seed=42)
@@ -187,7 +189,7 @@ def test_precompiled_bank_matches_declared_heights_and_footprint():
     for row,height in enumerate(HEIGHTS):
         spec = mujoco.MjSpec()
         spec.worldbody.add_body(name='terrain')
-        tile = CliffDropTerrainCfg(size=(5.,3.),height_buckets=HEIGHTS,min_drop=.02,max_drop=.03)
+        tile = CliffDropTerrainCfg(size=(5.,3.),height_buckets=HEIGHTS,min_drop=HEIGHTS[0],max_drop=HEIGHTS[-1])
         tile.function((row+.5)/len(HEIGHTS),spec,np.random.default_rng(42))
         model = spec.compile()
         # Upper edge at 1.5 absolute; spawn .95 means signed edge .55.
