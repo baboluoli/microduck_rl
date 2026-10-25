@@ -133,16 +133,24 @@ did. Session 1 went smoothly with that procedure; see "Gotchas" there. Differenc
 
 - **Session folder** `S=logs/hold-height-YYYYMMDD`, pod name `hold-height`.
 - **Inputs** for `/workspace/rl/sources/`:
-  - `logs/height-curriculum-20261025/artifacts/logs/rsl_rl/oracle_course/2026-10-25_08-08-00_height-curriculum-b02/model_199.pt`,
-    sha256 `7714f7d6e2be4308c4986a315c443efe7c7348d4acce22dfa5ac7fbe11ee8b46`.
-    This is the last good policy, the one that mastered 2.25 cm.
+  - The drift-penalty `model_99.pt`, the same input as session 1:
+    `logs/drift-penalty-20261024/artifacts/logs/rsl_rl/oracle_course/2026-10-24_22-01-47_drift-penalty-100/model_99.pt`,
+    sha256 `010a94116935924381dd16769bb4e79f1ee4e723491f6307b97eac097e78cdea`.
+    **User decision (2026-10-25):** start from this, not from block 2's
+    `model_199`. It is the least degraded policy: action std 1.05 vs 1.19,
+    speed before the edge 0.44 vs 0.50 m/s. It is slightly less skilled: 2.25 cm
+    passed at the 45/55 cm starts and failed at 65 cm only on impacts (5 > 3).
+    The test is about whether walking stays clean, so the cleanest start gives
+    the clearest answer. Training from scratch was considered and deferred: it
+    is worth its cost only if this session shows the rushing and noise are
+    baked in.
   - `logs/course-session-20261024/artifacts/logs/course-session/curriculum.json`
     (`upper_mm` 22.5). Do **not** use session 1's `curriculum.json`: it is at 25 mm.
   - `COMMIT`.
 - **Command:**
   ```
-  nohup bash -c 'uv run python scripts/run_height_curriculum_session.py --source sources/model_199.pt \
-    --source-sha 7714f7d6e2be4308c4986a315c443efe7c7348d4acce22dfa5ac7fbe11ee8b46 \
+  nohup bash -c 'uv run python scripts/run_height_curriculum_session.py --source sources/model_99.pt \
+    --source-sha 010a94116935924381dd16769bb4e79f1ee4e723491f6307b97eac097e78cdea \
     --curriculum sources/curriculum.json --output logs/hold-height --deadline-epoch DEADLINE \
     --max-nan-resets 5 --label hold-height --hold-height --blocks 4 > /workspace/session.log 2>&1; \
     echo $? > /workspace/session-exit' >/dev/null 2>&1 &
@@ -189,10 +197,13 @@ Then let the user decide:
 - Still degrading → the fixes were not enough. Candidates, each the user's
   call: reset or cap the action std, an even lower entropy, or stronger
   smoothness penalties.
+- Still rushing although rushing no longer pays, or noise not coming down →
+  the habits look baked in. Then retraining from an earlier ancestor (the
+  original walking policy) becomes worth its cost of several sessions.
 
 ## Risks
 
-- **The source's action std is already 1.19.** A weaker entropy bonus removes
+- **The source's action std is already 1.05** (0.96 before its own 100 updates). A weaker entropy bonus removes
   the push upward but may not bring it down quickly. If it stays high, report
   that; do not silently add a cap.
 - **Reward change shock.** The critic was trained on the lump-sum reward, so
