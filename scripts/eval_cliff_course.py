@@ -123,14 +123,15 @@ def evaluate(checkpoint, *, height, distance, seed, output, device='cuda:0', vid
             assert result['success'] == any(s['pulse'] for s in trace)
             contributions = torch.tensor(rewards[i]).sum(0).tolist()
             audit = dict(zip(terms,contributions))
-            assert abs(audit['cliff_landing']-80*result['success']) < 1e-4
+            # Pay-as-you-go completion credit: never negative, never above the budget.
+            assert -1e-5 <= audit['cliff_landing'] <= course.COMPLETION_POINTS + 1e-4, audit['cliff_landing']
             for name,term in cfg.rewards.items():
                 if term.weight < 0:
                     assert audit[name] <= 1e-5, (name,audit[name])
             if result['success']:
                 result['crossing_foot_centres'] = trace[-1]['foot_geom_centres']
                 result['crossing_root_x'] = trace[-1]['x']
-                result['crossing_overshoot'] = trace[-1]['x']-course.FINISH
+                result['crossing_overshoot'] = trace[-1]['x']-result['contact_x']-course.GOAL
             result.update(env=i, seed=seed, height=height, distance=distance,
                           trace=trace, reward_contributions=audit)
             results.append(result)
@@ -157,7 +158,7 @@ if __name__ == '__main__':
     sources = [Path(__file__), Path('src/mjlab_microduck/tasks/__init__.py'), Path('uv.lock'), *Path('src/mjlab_microduck/tasks/cliff').glob('*.py')]
     manifest = dict(checkpoint=str(args.checkpoint),checkpoint_sha256=hashlib.sha256(args.checkpoint.read_bytes()).hexdigest(),
         heights=args.heights, distances=args.distances, seeds=args.seeds, attempts_per_seed=24,
-        height_bank=course.HEIGHTS, resolution_m=.0005, finish_x=course.FINISH, forward_edge=course.FORWARD_EDGE,
+        height_bank=course.HEIGHTS, resolution_m=.0005, goal_m=course.GOAL, forward_edge=course.FORWARD_EDGE,
         python=platform.python_version(),torch=torch.__version__,
         # Pods receive a tarball without .git; the launcher passes the commit instead.
         git_head=os.environ.get('MICRODUCK_GIT_HEAD') or subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),

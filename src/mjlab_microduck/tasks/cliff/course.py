@@ -18,7 +18,13 @@ HEIGHTS = tuple(t / 10000 for t in (*range(200, 301, 5), *range(325, 1001, 25)))
 # fixed 0.25 cm steps would be tiny near 10 cm and need 32 stages.
 STAGES = (.02, .0225, .025, .03, .035, .04, .05, .06, .07, .08, .09, .10)
 EDGE = .55
+# Historical finish line (3 m past the edge). No longer the success rule; the
+# lower floor still extends past it, up to FORWARD_EDGE.
 FINISH = 3.55
+# Success: after the first lower-floor touchdown, walk this far forward
+# without an impact, tilt, physical failure or leaving the course. There is
+# no finish line to reach; this only rules out "land, then stand still".
+GOAL = 1.
 FORWARD_EDGE = 4.05
 SIDE_LIMIT = 1.15
 
@@ -37,13 +43,24 @@ class CourseState:
         for name in ('contact', 'impact', 'tilt', 'nonfinite', 'boundary', 'bad', 'paid', 'pulse'):
             setattr(self, name, torch.zeros(n, dtype=torch.bool, device=device))
         self.contact_x = torch.full((n,), float('nan'), device=device)
+        # Pay-as-you-go completion credit: the furthest X already paid for,
+        # and the distance paid on the latest control step (metres).
+        self.paid_x = torch.full((n,), float('nan'), device=device)
+        self.gain = torch.zeros(n, device=device)
 
     def reset(self, ids):
         for name in ('contact', 'impact', 'tilt', 'nonfinite', 'boundary', 'bad', 'paid', 'pulse'):
             getattr(self, name)[ids] = False
         self.contact_x[ids] = float('nan')
+        self.paid_x[ids] = float('nan')
+        self.gain[ids] = 0
 
-    def update(self, *, step, age, x, y, lower, cos_tilt, head, trunk, finite, failure):
+    def update(self, *, step, age, x, y, lower, cos_tilt, head, trunk, finite, failure, cap=None):
+        """Advance the latched course state by one control step.
+
+        ``cap`` limits the distance paid per step (commanded speed x control
+        dt). None pays any forward distance; tests use that default.
+        """
         if self.last_step == step:
             return self.pulse
         self.last_step = step
@@ -57,8 +74,21 @@ class CourseState:
         self.tilt |= self.contact & (cos_tilt <= math.cos(math.pi / 4))
         self.boundary |= (x < -.75) | (x > 3.8) | (y.abs() > SIDE_LIMIT)
         self.bad |= self.impact | self.nonfinite | self.tilt | self.boundary | failure
-        self.pulse = self.contact & (x >= FINISH) & ~self.bad & ~self.paid
+        self.pulse = self.contact & (x - self.contact_x >= GOAL) & ~self.bad & ~self.paid
         self.paid |= self.pulse
+        # Distance credit starts where the foot first touched the lower floor
+        # and stops GOAL metres later. Only new ground counts (a high-water mark),
+        # so stepping back and forth earns nothing. Each step pays at most
+        # ``cap``; faster travel becomes a backlog that is paid only if the
+        # robot later slows down. Success ends the episode, so a robot that
+        # rushes loses its backlog: walking at the commanded speed pays best.
+        self.paid_x = torch.where(first, x, self.paid_x)
+        paying = self.contact & ~self.bad
+        ahead = torch.nan_to_num(torch.minimum(x, self.contact_x + GOAL) - self.paid_x).clamp_min(0)
+        if cap is not None:
+            ahead = torch.minimum(ahead, cap)
+        self.gain = torch.where(paying, ahead, torch.zeros_like(ahead))
+        self.paid_x = torch.where(paying, self.paid_x + self.gain, self.paid_x)
         return self.pulse
 
 
@@ -154,9 +184,11 @@ def update(env):
         cfg = env.termination_manager.get_term_cfg(name)
         if not cfg.time_out:
             failure |= env.termination_manager.get_term(name)
+    # Commanded forward speed; the floor avoids a zero cap for a stop command.
+    cap = env.command_manager.get_command('twist')[:, 0].clamp_min(.01) * env.step_dt
     s.update(step=int(env.common_step_counter), age=env.episode_length_buf,
              x=p[:, 0], y=p[:, 1], lower=lower_contact(foot.found, foot.pos, env.scene.env_origins, heights(env)),
-             cos_tilt=1-2*(q[:, 1]**2+q[:, 2]**2), head=head, trunk=trunk, finite=finite, failure=failure)
+             cos_tilt=1-2*(q[:, 1]**2+q[:, 2]**2), head=head, trunk=trunk, finite=finite, failure=failure, cap=cap)
     return s
 
 
@@ -195,6 +227,17 @@ def sideways_drift(env, tau_s=1.):
     return -ema.abs()
 
 
+# Total completion budget (points), paid per metre over the GOAL after landing.
+# Until 2026-10-25 the whole 80 was one lump at a finish line 3 m past the
+# edge, which the commanded pace could not reach within 12 s. A reward is
+# worth more the sooner it arrives, so the lump paid for rushing: the robot
+# sped up toward the finish (0.47 -> 0.80 m/s against a 0.23 m/s command) and
+# its walking degraded over consecutive training blocks.
+COMPLETION_POINTS = 80
+POINTS_PER_METRE = COMPLETION_POINTS / GOAL
+
+
 def reward(env):
-    # Success is itself a termination: masking reset_terminated would erase it.
-    return 80 * update(env).pulse.float() / env.step_dt
+    # The reward manager multiplies by dt, so dividing here pays exactly
+    # POINTS_PER_METRE per metre of credited distance.
+    return POINTS_PER_METRE * update(env).gain / env.step_dt

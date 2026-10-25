@@ -220,3 +220,46 @@ def test_loop_stops_when_last_stage_mastered():
     assert fake.run() == 'last stage mastered'
     assert fake.trained == [90, 100]
     assert [p for _, p in fake.records] == [90, 100]
+
+
+def test_course_entropy_bonus_is_reduced_only_for_course():
+    from mjlab_microduck.tasks.cliff.env_cfg import MicroduckCliffCourseRlCfg, MicroduckCliffOracleRlCfg
+    assert MicroduckCliffCourseRlCfg.algorithm.entropy_coef == .003
+    assert MicroduckCliffOracleRlCfg.algorithm.entropy_coef == .01  # Historical tasks unchanged.
+
+
+def _walk(speeds, cap=.21*.02, dt=.02, contact_at=.65, bad_at=None):
+    """Drive CourseState along X at the given per-step speeds; return (total points, success)."""
+    from mjlab_microduck.tasks.cliff.course import CourseState, POINTS_PER_METRE
+    s, x, total = CourseState(1, 'cpu'), contact_at, 0.
+    for step, v in enumerate(speeds, 1):
+        x += v * dt
+        head = 16. if bad_at is not None and step == bad_at else 0.
+        pulse = s.update(step=step, age=torch.tensor([step]), x=torch.tensor([x]), y=torch.zeros(1),
+                         lower=torch.tensor([True]), cos_tilt=torch.ones(1), head=torch.tensor([head]),
+                         trunk=torch.zeros(1), finite=torch.tensor([True]), failure=torch.tensor([False]),
+                         cap=torch.tensor([cap]))
+        total += POINTS_PER_METRE * s.gain.item()
+        if pulse.item():
+            return total, True
+    return total, False
+
+
+def test_completion_credit_pays_commanded_pace_best():
+    from mjlab_microduck.tasks.cliff.course import COMPLETION_POINTS
+    steady, ok = _walk([.21] * 2000)
+    assert ok and steady == pytest.approx(COMPLETION_POINTS, rel=1e-3)  # The full metre is paid.
+    rushed, ok = _walk([.5] * 2000)
+    assert ok and rushed < .5 * steady  # Arriving at 2.4x the command forfeits the unpaid backlog.
+    # A brief speed burst followed by slowing down is paid in full via the backlog.
+    burst, _ = _walk([.4] * 50 + [.1] * 2000)
+    assert burst == pytest.approx(steady, rel=1e-2)
+
+
+def test_completion_credit_ignores_retreat_and_stops_on_impact():
+    shuffle, _ = _walk([.3, -.3] * 500)  # Back and forth: only new ground counts.
+    assert shuffle == pytest.approx(_walk([.3])[0], rel=1e-6)
+    clean, _ = _walk([.21] * 100)
+    hit, ok = _walk([.21] * 100, bad_at=50)
+    # Step 1 is the touchdown (pays nothing); steps 2-49 pay, the impact step does not.
+    assert not ok and hit == pytest.approx(clean * 48 / 99, rel=1e-6)

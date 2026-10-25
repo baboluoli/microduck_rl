@@ -2,12 +2,26 @@
 import math
 import pytest
 import torch
-from mjlab_microduck.tasks.cliff.course import CourseState, lower_contact, HEIGHTS, STAGES, FINISH
+from mjlab_microduck.tasks.cliff.course import CourseState, lower_contact, HEIGHTS, STAGES, FINISH, GOAL
 from mjlab_microduck.tasks.cliff.course_curriculum import Curriculum, Result, rank
 
 
+LANDED_X = .6
+GOAL_X = LANDED_X + GOAL + .01  # Just past the 1 m goal for a robot that landed at LANDED_X.
+
+
+def landed(n=1):
+    """A state whose robots already touched the lower floor at LANDED_X."""
+    s = CourseState(n, 'cpu')
+    s.contact[:] = True
+    s.contact_x[:] = LANDED_X
+    s.paid_x[:] = LANDED_X
+    return s
+
+
 def tick(s, step=1, **kwargs):
-    values = dict(step=step, age=torch.tensor([step]), x=torch.tensor([FINISH]),
+    # Age 1 marks a new episode (state resets), so default to a running episode.
+    values = dict(step=step, age=torch.tensor([step + 1]), x=torch.tensor([GOAL_X]),
                   y=torch.zeros(1), lower=torch.tensor([True]), cos_tilt=torch.ones(1),
                   head=torch.zeros(1), trunk=torch.zeros(1), finite=torch.tensor([True]),
                   failure=torch.tensor([False]))
@@ -16,19 +30,22 @@ def tick(s, step=1, **kwargs):
 
 
 def test_once_cached_and_staggered_reset():
-    s = CourseState(1, 'cpu')
+    s = landed()
     assert tick(s).item()
     assert tick(s).item()
     assert not tick(s, 2).item()
     s.reset(torch.tensor([0]))
-    assert tick(s, 3).item()
+    assert not tick(s, 3).item()  # Touchdown here: the 1 m starts now.
+    assert tick(s, 4, x=torch.tensor([GOAL_X + GOAL + .01])).item()  # Margin: float32 rounding.
 
 
 @pytest.mark.parametrize('failure', ['head', 'trunk', 'finite', 'failure', 'cos_tilt', 'lower', 'y'])
 def test_same_step_veto(failure):
     value = {'head': 16., 'trunk': 21., 'finite': False, 'failure': True,
              'cos_tilt': math.cos(math.pi/4), 'lower': False, 'y': 1.2}[failure]
-    assert not tick(CourseState(1, 'cpu'), **{failure:torch.tensor([value])}).item()
+    # 'lower': a robot that never touched the lower floor cannot succeed.
+    s = CourseState(1, 'cpu') if failure == 'lower' else landed()
+    assert not tick(s, **{failure:torch.tensor([value])}).item()
 
 
 @pytest.mark.parametrize('height', HEIGHTS)
@@ -39,19 +56,20 @@ def test_contact_geometry(height):
 
 
 def test_latched_impact_and_contact_tilt():
-    s = CourseState(1,'cpu')
-    tick(s, x=torch.tensor([1.]), lower=torch.tensor([False]), head=torch.tensor([16.]))
-    assert not tick(s,2).item()
-    s = CourseState(1,'cpu')
-    tick(s, x=torch.tensor([1.]), cos_tilt=torch.tensor([.7]))
-    assert not tick(s,2).item()
+    s = CourseState(1,'cpu')  # Impact before touchdown still disqualifies.
+    tick(s, x=torch.tensor([.5]), lower=torch.tensor([False]), head=torch.tensor([16.]))
+    tick(s, 2, x=torch.tensor([.7]))
+    assert not tick(s, 3, x=torch.tensor([1.8])).item()
+    s = CourseState(1,'cpu')  # Tilt on the touchdown sample counts.
+    tick(s, x=torch.tensor([.7]), cos_tilt=torch.tensor([.7]))
+    assert not tick(s, 2, x=torch.tensor([1.8])).item()
 
 
 @pytest.mark.parametrize('side', [-1., 1.])
 def test_boundary_is_strict_and_latched(side):
     # Exactly on the permitted line is valid; crossing it ends the task even
-    # if the same sample reaches the finish. Returning inside cannot erase it.
-    s = CourseState(1, 'cpu')
+    # if the same sample reaches the goal. Returning inside cannot erase it.
+    s = landed()
     tick(s, x=torch.tensor([1.]), y=torch.tensor([side*1.15]))
     assert not s.boundary.item()
     assert not tick(s, 2, y=torch.tensor([side*1.151])).item()
@@ -87,11 +105,13 @@ def test_config_and_reward_integration():
     assert 'cliff_landing' not in cfg.terminations
     assert not cfg.terminations['course_boundary'].time_out
     assert cfg.terminations['time_out'].time_out
+    from mjlab_microduck.tasks.cliff.course import POINTS_PER_METRE
     for dt in (.01,.02,.04):
         s = CourseState(1,'cpu')
-        tick(s)
-        env = SimpleNamespace(_course=s, common_step_counter=1, step_dt=dt)
-        assert reward(env).item()*dt == pytest.approx(80)
+        tick(s, x=torch.tensor([1.]))
+        tick(s, 2, x=torch.tensor([1.1]))
+        env = SimpleNamespace(_course=s, common_step_counter=2, step_dt=dt)
+        assert reward(env).item()*dt == pytest.approx(POINTS_PER_METRE*.1)
 
 
 def test_independent_classifier():
@@ -99,7 +119,7 @@ def test_independent_classifier():
     for mode in ('good', 'impact', 'tilt', 'missing', 'boundary'):
         s = CourseState(1,'cpu')
         samples = []
-        for i,x in enumerate((.6, 1., 2., FINISH), 1):
+        for i,x in enumerate((.6, 1., 1.3, 1.7), 1):  # Goal (1 m past touchdown) reached on sample 4.
             head = 16. if mode == 'impact' and i == 2 else 0.
             cosine = .7 if mode == 'tilt' and i == 1 else 1.
             y = 1.2 if mode == 'boundary' and i == 4 else 0.
@@ -170,14 +190,14 @@ def test_random_reset_moves_full_pose_and_keeps_fixed_edge():
 
 
 def test_staggered_rows_and_cached_manager_calls():
-    s = CourseState(2,'cpu')
-    kw = dict(age=torch.tensor([1,5]),x=torch.tensor([FINISH,1.]),y=torch.zeros(2),
+    s = landed(2)
+    kw = dict(age=torch.tensor([2,5]),x=torch.tensor([GOAL_X,1.]),y=torch.zeros(2),
               lower=torch.ones(2,dtype=torch.bool),cos_tilt=torch.ones(2),head=torch.zeros(2),
               trunk=torch.zeros(2),finite=torch.ones(2,dtype=torch.bool),failure=torch.zeros(2,dtype=torch.bool))
     assert s.update(step=1,**kw).tolist() == [True,False]
     assert s.update(step=1,**kw).tolist() == [True,False]
     s.reset(torch.tensor([0]))
-    kw.update(age=torch.tensor([1,6]),x=torch.tensor([0.,FINISH]),lower=torch.tensor([False,True]))
+    kw.update(age=torch.tensor([1,6]),x=torch.tensor([0.,GOAL_X]),lower=torch.tensor([False,True]))
     assert s.update(step=2,**kw).tolist() == [False,True]
     assert not s.contact[0] and s.contact[1]
 
@@ -268,3 +288,8 @@ def test_sideways_drift_uses_heading_frame_and_resets():
     env.episode_length_buf[:] = 1  # New episode: no penalty carried over.
     env.scene['robot'].data.root_link_lin_vel_w[:] = torch.tensor([[.2 * math.cos(yaw), .2 * math.sin(yaw), 0.]])
     assert sideways_drift(env).item() == pytest.approx(0, abs=1e-6)
+
+
+def test_classifier_goal_matches_training_goal():
+    from mjlab_microduck.tasks.cliff import course_evaluation
+    assert course_evaluation.GOAL == GOAL == 1.

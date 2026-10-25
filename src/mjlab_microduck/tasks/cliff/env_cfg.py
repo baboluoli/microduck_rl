@@ -339,7 +339,7 @@ MicroduckCliffWalkThroughRlCfg.run_name = 'oracle_walkthrough_fixed'
 
 
 def make_microduck_cliff_course_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
-    """Fixed finish, immutable height bank (2–3 cm at 0.5 mm, 3.25–10 cm at 2.5 mm), randomized approach only."""
+    """Walk 1 m past landing, immutable height bank (2–3 cm at 0.5 mm, 3.25–10 cm at 2.5 mm), randomized approach only."""
     from . import course
     cfg = make_microduck_cliff_oracle_env_cfg(play)
     cfg.episode_length_s = 12.
@@ -372,3 +372,7 @@ def make_microduck_cliff_course_env_cfg(play: bool = False) -> ManagerBasedRlEnv
 MicroduckCliffCourseRlCfg = deepcopy(MicroduckCliffOracleRlCfg)
 MicroduckCliffCourseRlCfg.experiment_name = 'oracle_course'
 MicroduckCliffCourseRlCfg.run_name = 'oracle_course'
+# The entropy bonus rewards wider exploration noise. On the course it inflated
+# the action std every 100-update block (0.96 -> 1.43 over the 2026-10-25
+# height session) while walking degraded. Weaker bonus, course task only.
+MicroduckCliffCourseRlCfg.algorithm.entropy_coef = 0.003

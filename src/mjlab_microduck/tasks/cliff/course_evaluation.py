@@ -1,6 +1,10 @@
 """Independent scalar classifier for pre-reset evidence, including both feet."""
 import math
 
+# Duplicated from course.GOAL on purpose: this classifier stays independent of the
+# training code, and a test asserts the two agree.
+GOAL = 1.
+
 
 def classify(samples, *, height, dt=.02):
     contact_x = None
@@ -24,12 +28,13 @@ def classify(samples, *, height, dt=.02):
         if sample['x'] < -.75 or sample['x'] > 3.8 or abs(sample['y']) > 1.15: reasons.add('boundary')
         if contact_x is not None and sample['x']-contact_x >= 1 and not reasons:
             one_metre = True
-        if contact_x is not None and sample['x'] >= 3.55 and not reasons:
+        if contact_x is not None and sample['x']-contact_x >= GOAL and not reasons:
             success = True
             break
     return dict(success=success, one_metre=one_metre, contact=contact_x is not None,
-                contact_x=contact_x, late_contact=contact_x is not None and 3.55-contact_x < 1,
+                # Late: too little floor left before the X=3.8 m course limit to walk GOAL.
+                contact_x=contact_x, late_contact=contact_x is not None and 3.8-contact_x < GOAL,
                 distance_after_contact=None if contact_x is None or end is None else end['x']-contact_x,
-                duration=0 if end is None else end['age']*dt, finish_x=3.55,
+                duration=0 if end is None else end['age']*dt, goal_m=GOAL,
                 events=sorted(reasons), outcome='success' if success else
                 'boundary' if 'boundary' in reasons else 'failure' if reasons else 'timeout')
