@@ -138,6 +138,14 @@ try:
                 f"[mdp] Patch 5: WARM START from {path} — common_step_counter "
                 f"{restored} → 0, iteration → 0 (curricula restart; weights/normalizer/optimizer kept)"
             )
+        else:
+            # Logged so a session runner can assert the schedules really
+            # resumed where the checkpoint left them (not just infer it).
+            print(
+                f"[mdp] Patch 5: RESUME from {path} — common_step_counter "
+                f"{self.env.unwrapped.common_step_counter} kept, iteration "
+                f"{self.current_learning_iteration} kept"
+            )
         return infos
 
     _MjlabRunner.load = _load_with_warm_start

@@ -1,7 +1,8 @@
-"""Local watchdog/retrieval helpers for an explicitly approved RunPod session.
+"""Local watchdog/retrieval helpers for an explicitly approved RunPod or Vast.ai session.
 
 This process depends on the Mac remaining awake and online. It never deletes a
-pod or volume. Run watchdog before starting remote work, and retire it only after
+pod, instance or volume (destroying a Vast instance stays a separate, explicit
+step after retrieval). Run watchdog before starting remote work, and retire it only after
 retrieval and independently confirmed stopped status.
 """
 import argparse
@@ -13,10 +14,46 @@ import subprocess
 import time
 
 
+# How each provider stops an instance and reports its state. Vast's
+# ``actual_status`` reads ``exited`` once a stopped container is down.
+STOPPED = {'runpod': {'STOPPED'}, 'vast': {'STOPPED', 'EXITED'}}
+
+
+def stop_command(provider, pod_id):
+    if provider == 'vast':
+        return ['vastai', 'stop', 'instance', pod_id]
+    return ['uv', 'run', '--no-sync', 'runpodctl', 'pod', 'stop', pod_id]
+
+
+def status_command(provider, pod_id):
+    if provider == 'vast':
+        return ['vastai', 'show', 'instance', pod_id, '--raw']
+    return ['uv', 'run', '--no-sync', 'runpodctl', 'pod', 'get', pod_id]
+
+
+def is_stopped(provider, stdout):
+    state = json.loads(stdout)
+    records = state if isinstance(state, list) else [state]
+    field = 'actual_status' if provider == 'vast' else 'runtimeStatus'
+    return any(str(row.get(field) or '').upper() in STOPPED[provider] for row in records)
+
+
+def stop(provider, pod_id, attempts=12, delay=5):
+    subprocess.run(stop_command(provider, pod_id), check=True)
+    for _ in range(attempts):
+        result = subprocess.run(status_command(provider, pod_id), check=True, capture_output=True, text=True)
+        if is_stopped(provider, result.stdout):
+            print(f'Confirmed stopped status for {pod_id}')
+            return
+        time.sleep(delay)
+    raise RuntimeError('Stop requested, but stopped status was not confirmed; inspect pod immediately')
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('action',choices=['watch','retrieve','stop'])
-    p.add_argument('--pod-id',required=True)
+    p.add_argument('--pod-id',required=True,help='RunPod pod id or Vast instance id')
+    p.add_argument('--provider',choices=['runpod','vast'],default='runpod')
     p.add_argument('--deadline-epoch',type=float)
     p.add_argument('--ssh-host')
     p.add_argument('--ssh-config',type=Path,help='Session-specific OpenSSH config (including port and key)')
@@ -24,25 +61,13 @@ def main():
     p.add_argument('--output-relative',default='logs/course-session')
     p.add_argument('--destination',type=Path)
     args = p.parse_args()
-    def stop():
-        subprocess.run(['uv','run','--no-sync','runpodctl','pod','stop',args.pod_id],check=True)
-        for _ in range(12):
-            result = subprocess.run(['uv','run','--no-sync','runpodctl','pod','get',args.pod_id],
-                                    check=True,capture_output=True,text=True)
-            state = json.loads(result.stdout)
-            records = state if isinstance(state,list) else [state]
-            if any(str(row.get('runtimeStatus','')).upper() == 'STOPPED' for row in records):
-                print(f'Confirmed stopped status for {args.pod_id}')
-                return
-            time.sleep(5)
-        raise RuntimeError('Stop requested, but stopped status was not confirmed; inspect pod immediately')
     if args.action == 'stop':
-        stop()
+        stop(args.provider,args.pod_id)
     elif args.action == 'watch':
         if args.deadline_epoch is None: p.error('--deadline-epoch required')
         while time.time() < args.deadline_epoch:
-            time.sleep(min(30,args.deadline_epoch-time.time()))
-        stop()
+            time.sleep(max(0,min(30,args.deadline_epoch-time.time())))
+        stop(args.provider,args.pod_id)
     else:
         if not all((args.ssh_host,args.remote_root,args.destination)):
             p.error('retrieve requires --ssh-host, --remote-root and --destination')

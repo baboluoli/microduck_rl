@@ -239,6 +239,27 @@ def test_warm_start_patch_resets_counters(monkeypatch):
     assert r.current_learning_iteration == 3750
 
 
+def test_resume_logs_the_kept_counter(monkeypatch, capsys):
+    """A plain resume prints the counter it kept: the height-ladder runner
+    asserts on this line to prove the walking schedules stayed final."""
+    from mjlab.rl.runner import MjlabOnPolicyRunner
+
+    class _Unwrapped:
+        common_step_counter = 48000
+
+    class _Env:
+        unwrapped = _Unwrapped()
+
+    class _Runner:
+        env = _Env()
+        current_learning_iteration = 2000
+
+    monkeypatch.setattr(microduck_mdp, "_orig_runner_load", lambda self, path, *a, **k: {})
+    monkeypatch.delenv(microduck_mdp.WARM_START_ENV, raising=False)
+    MjlabOnPolicyRunner.load(_Runner(), "model_staged.pt")
+    assert "common_step_counter 48000 kept, iteration 2000 kept" in capsys.readouterr().out
+
+
 # ── Run-1 fixes: fallen-scaled smoothness + side spawns ──────────────────────
 
 def test_smoothness_costs_are_fallen_scaled():

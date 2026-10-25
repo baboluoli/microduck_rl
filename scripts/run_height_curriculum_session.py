@@ -21,6 +21,12 @@ What one session does:
    blocks (a stall), or when there is not enough time left for another block
    plus its checks (``provisional.json``).
 
+``--resume-source`` treats the source as the SAME task (a resume, not a warm
+start): block 1 and the smoke run keep the source's iteration and step
+counter, so step-based schedules (the course-walk smoothing and DR ramps)
+stay where the source finished them. Each training log must then show the
+counter that was staged, at or past every schedule's final stage.
+
 ``--hold-height`` keeps the height fixed for ``--blocks`` blocks: the checks
 run as usual and record ``would_advance``, but the stage is never raised and
 there is no stall stop. The regression stop still applies.
@@ -86,8 +92,35 @@ def sampled_bands(counts, upper):
                 above_stage=sum(counts[frontier_end:]), total=total)
 
 
+def start_point(payload, resume):
+    """(iteration to stage the source at, warm-start the first training call?).
+
+    Default: a warm start from another task, counters restart at 0. Resume:
+    the source's own iteration, so its schedules keep their stage.
+    """
+    return (int(payload['iter']), False) if resume else (0, True)
+
+
+def final_schedule_step(curriculum):
+    """Env step at which the last staged schedule reaches its final stage.
+
+    ``curriculum`` is an env cfg's curriculum dict. Any term param that is a
+    list of ``{'step': ...}`` dicts counts as a schedule; 0 if there are none.
+    """
+    steps = [stages[-1]['step'] for term in curriculum.values() for stages in (term.params or {}).values()
+             if isinstance(stages, list) and stages and isinstance(stages[0], dict) and 'step' in stages[0]]
+    return max(steps, default=0)
+
+
+def resumed_counter(text):
+    """The step counter a plain resume kept, from mdp.py Patch 5's log line."""
+    found = re.findall(r'\[mdp\] Patch 5: RESUME from .* common_step_counter (\d+) kept', text)
+    return int(found[-1]) if found else None
+
+
 def run_blocks(state, *, train_block, check, confirm, now, deadline, record,
-               max_blocks_per_stage=5, block_budget_s=BLOCK_BUDGET_S, hold=False, max_blocks=None):
+               max_blocks_per_stage=5, block_budget_s=BLOCK_BUDGET_S, hold=False, max_blocks=None,
+               warm_first=True):
     """The block loop: train, check, maybe confirm and advance, decide to stop.
 
     Pure decision logic. ``train_block(block, warm)`` returns a checkpoint,
@@ -98,7 +131,8 @@ def run_blocks(state, *, train_block, check, confirm, now, deadline, record,
     ``hold=True`` keeps the height fixed: the same checks run, but the stage
     is never raised. ``would_advance`` records what the gate would have done.
     The stall stop is off; the regression stop and time budget still apply.
-    ``max_blocks`` stops the loop after that many blocks.
+    ``max_blocks`` stops the loop after that many blocks. ``warm_first=False``
+    (a resume) trains block 1 without the warm start too.
     """
     block = 0
     while True:
@@ -107,7 +141,7 @@ def run_blocks(state, *, train_block, check, confirm, now, deadline, record,
         if deadline - now() < block_budget_s:
             return 'time budget'
         block += 1
-        checkpoint = train_block(block, warm=block == 1)
+        checkpoint = train_block(block, warm=warm_first and block == 1)
         state.blocks_at_stage += 1
         upper_mm = state.upper_mm
         development = check(checkpoint)
@@ -184,6 +218,8 @@ def main():
                    help='Keep the current height: never advance, no stall stop (records would_advance)')
     p.add_argument('--blocks', type=int, default=4, help='With --hold-height: number of blocks to train')
     p.add_argument('--task', choices=TASKS, default='course', help='Training task (evaluation is unchanged)')
+    p.add_argument('--resume-source', action='store_true',
+                   help="Source is the same task: keep its iteration and step counter (no warm start)")
     args = p.parse_args()
     global TASK, ROOT
     TASK, ROOT = TASKS[args.task]
@@ -191,6 +227,15 @@ def main():
     # Reserve 15 minutes for retrieval/shutdown; never exceed two hours.
     deadline = min(args.deadline_epoch, time.time() + SESSION_CAP_S) - RETRIEVAL_RESERVE_S
     state = Curriculum.load(args.curriculum)
+    source_iteration, warm_source = start_point(
+        torch.load(args.source, map_location='cpu', weights_only=False), args.resume_source)
+    final_step = 0
+    if args.resume_source:
+        from mjlab.tasks.registry import load_env_cfg
+        import mjlab_microduck.tasks  # noqa: F401  Registers the tasks.
+        final_step = final_schedule_step(load_env_cfg(TASK).curriculum)
+        assert source_iteration * STEPS_PER_UPDATE >= final_step, (
+            f'Source iteration {source_iteration} is before the final schedule stage (step {final_step})')
     args.output.mkdir(parents=True, exist_ok=False)
     (args.output / 'session.json').write_text(json.dumps(dict(
         source=str(args.source), source_sha256=args.source_sha, curriculum=str(args.curriculum),
@@ -202,6 +247,7 @@ def main():
         task=TASK, distances=DISTANCES, regression_distance=REGRESSION_DISTANCE,
         development_seeds=DEVELOPMENT_SEEDS, confirmation_seeds=CONFIRMATION_SEEDS,
         block_budget_s=BLOCK_BUDGET_S, retrieval_reserve_s=RETRIEVAL_RESERVE_S,
+        resume_source=args.resume_source, source_iteration=source_iteration, final_schedule_step=final_step,
         git_head=os.environ.get('MICRODUCK_GIT_HEAD')), indent=2))
     (args.output / 'source.diff').write_bytes(subprocess.run(
         ['git', 'diff', 'HEAD'], capture_output=True).stdout)
@@ -291,6 +337,13 @@ def main():
         assert 'Loading model checkpoint from:' in text
         if warm:
             assert 'weights/normalizer/optimizer kept' in text
+        else:
+            # Direct check that the schedules resumed: the counter the training
+            # process kept must be the staged one, at or past the final stage.
+            counter = resumed_counter(text)
+            if counter != iteration * STEPS_PER_UPDATE or counter < final_step:
+                raise RuntimeError(f'{label} resumed at step counter {counter}, expected '
+                                   f'{iteration * STEPS_PER_UPDATE} (final schedule step {final_step})')
         # The last "[course] Actual sampled height counts" line must fit the stage.
         lines = re.findall(r'\[course\] Actual sampled height counts[^:]*: (\[[^\]]*\])', text)
         bands = sampled_bands(json.loads(lines[-1]), state.upper_mm / 1000) if lines else None
@@ -330,12 +383,13 @@ def main():
               f"would_advance={entry['would_advance']} dev={entry['development_passes']} "
               f"confirm={entry['confirmation_passes']} quality={entry['quality']}", flush=True)
 
-    previous = dict(checkpoint=copied, iteration=0)
+    previous = dict(checkpoint=copied, iteration=source_iteration)
 
     def train_block(block, warm):
         # The first block warm-starts the source (step counter restarts at 0,
-        # weights/normalizer/optimizer kept). Later blocks resume the previous
-        # block at its cumulative iteration, staged with the current state.
+        # weights/normalizer/optimizer kept), unless --resume-source. Later
+        # blocks resume the previous block at its cumulative iteration, staged
+        # with the current state.
         label = f'{args.label}-b{block:02}'
         checkpoint, bands = train(previous['checkpoint'], previous['iteration'], args.block_updates, 2048,
                                   label, warm, args.max_nan_resets)
@@ -348,7 +402,7 @@ def main():
     try:
         command(['--with', 'pytest', 'pytest', 'tests/test_cliff_course.py', 'tests/test_nan_forensics.py', '-q'],
                 'runtime-tests')
-        smoke, _ = train(copied, 0, 5, 64, f'{args.label}-smoke', warm=True)
+        smoke, _ = train(copied, source_iteration, 5, 64, f'{args.label}-smoke', warm=warm_source)
         command(['python', 'scripts/export.py', TASK, '--checkpoint-file', str(smoke),
                  '--num-envs', '1', '--onnx-file', str(args.output / 'smoke.onnx')], 'smoke-export')
         import numpy as np
@@ -378,7 +432,8 @@ def main():
               f"quality={entry['quality']}", flush=True)
         reason = run_blocks(state, train_block=train_block, check=check, confirm=confirm, now=time.time,
                             deadline=deadline, record=record, max_blocks_per_stage=args.max_blocks_per_stage,
-                            hold=args.hold_height, max_blocks=args.blocks if args.hold_height else None)
+                            hold=args.hold_height, max_blocks=args.blocks if args.hold_height else None,
+                            warm_first=warm_source)
         if reason == 'time budget':
             (args.output / 'provisional.json').write_text(json.dumps(dict(
                 checkpoint=selection['last'], reason='Not enough time for another block plus checks',

@@ -308,3 +308,122 @@ def test_completion_credit_ignores_retreat_and_stops_on_impact():
     hit, ok = _walk([.21] * 100, bad_at=50)
     # Step 1 is the touchdown (pays nothing); steps 2-49 pay, the impact step does not.
     assert not ok and hit == pytest.approx(clean * 48 / 99, rel=1e-6)
+
+
+def test_resume_keeps_the_source_iteration_and_skips_the_warm_start():
+    assert session.start_point({'iter': 2000}, resume=True) == (2000, False)
+    assert session.start_point({'iter': 2000}, resume=False) == (0, True)
+
+
+def test_resumed_loop_trains_every_block_without_warm_start():
+    fake = FakeSession(Curriculum(upper_mm=25), [(False, True, None)] * 3)
+    assert fake.run(hold=True, max_blocks=3, warm_first=False) == 'block limit'
+    assert fake.warm == [False] * 3
+
+
+def test_final_schedule_step_of_the_course_walk_task():
+    from mjlab_microduck.tasks.cliff.env_cfg import make_microduck_cliff_course_walk_env_cfg
+    # head_pose_range is the last walking schedule: update 2000 x 24 env steps.
+    assert session.final_schedule_step(make_microduck_cliff_course_walk_env_cfg().curriculum) == 2000 * 24
+    term = SimpleNamespace(params={'weight_stages': [{'step': 0}, {'step': 240}], 'other': [1, 2]})
+    assert session.final_schedule_step({'a': term, 'b': SimpleNamespace(params=None)}) == 240
+    assert session.final_schedule_step({}) == 0
+
+
+def test_resumed_counter_reads_the_patch_5_line():
+    text = ('[mdp] Patch 5: RESUME from logs/x/model_staged.pt — common_step_counter 48000 kept, '
+            'iteration 2000 kept\n')
+    assert session.resumed_counter(text) == 48000
+    assert session.resumed_counter('[mdp] Patch 5: WARM START from x — common_step_counter 48000 → 0') is None
+
+
+def _synthetic_checkpoint(actor_in=5, critic_in=7, height=.02):
+    """Tiny checkpoint with the real layout: height last, untrained, zero Adam moments there."""
+    def network(n):
+        mean, var = torch.rand(1, n), torch.rand(1, n) + .1
+        mean[0, -1], var[0, -1] = height, 0.
+        return {'obs_normalizer._mean': mean, 'obs_normalizer._var': var,
+                'mlp.0.weight': torch.randn(8, n), 'mlp.0.bias': torch.randn(8)}
+    payload = dict(actor_state_dict=network(actor_in), critic_state_dict=network(critic_in), iter=2000, infos={})
+    state = {}
+    for j, n in enumerate((actor_in, critic_in)):
+        moments = {k: torch.rand(8, n) for k in ('exp_avg', 'exp_avg_sq')}
+        for m in moments.values():
+            m[:, -1] = 0
+        state[j] = moments
+    payload['optimizer_state_dict'] = dict(state=state, param_groups=[])
+    return payload
+
+
+def _prepare():
+    spec = importlib.util.spec_from_file_location('prepare_height_input', SCRIPTS / 'prepare_height_input.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_prepare_height_input_zeroes_only_the_height_columns():
+    import copy
+    payload = _synthetic_checkpoint()
+    before = copy.deepcopy(payload)
+    assert _prepare().zero_height_input(payload) == dict(actor_state_dict=4, critic_state_dict=6)
+    for name in ('actor_state_dict', 'critic_state_dict'):
+        after, old = payload[name], before[name]
+        assert (after['mlp.0.weight'][:, -1] == 0).all()
+        assert torch.equal(after['mlp.0.weight'][:, :-1], old['mlp.0.weight'][:, :-1])
+        for k in ('obs_normalizer._mean', 'obs_normalizer._var', 'mlp.0.bias'):
+            assert torch.equal(after[k], old[k])
+    for j in (0, 1):
+        for k in ('exp_avg', 'exp_avg_sq'):
+            assert torch.equal(payload['optimizer_state_dict']['state'][j][k], before['optimizer_state_dict']['state'][j][k])
+    assert payload['iter'] == 2000
+
+
+def test_prepare_height_input_refuses_a_wrong_layout():
+    import copy
+    prepare = _prepare()
+    with pytest.raises(ValueError, match='mean'):
+        prepare.zero_height_input(_synthetic_checkpoint(height=.5))
+    trained = _synthetic_checkpoint()
+    trained['critic_state_dict']['obs_normalizer._var'][0, -1] = 1e-3
+    with pytest.raises(ValueError, match='variance'):
+        prepare.zero_height_input(trained)
+    moved = _synthetic_checkpoint()
+    moved['optimizer_state_dict']['state'][0]['exp_avg'][0, -1] = 1e-9  # Rounding-sized: accepted.
+    _prepare().zero_height_input(copy.deepcopy(moved))
+    moved['optimizer_state_dict']['state'][0]['exp_avg'][0, -1] = .1
+    with pytest.raises(ValueError, match='Adam'):
+        prepare.zero_height_input(moved)
+
+
+def _pod_control():
+    spec = importlib.util.spec_from_file_location('pod_control', SCRIPTS / 'cliff_course_pod_control.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize('provider, stop_cmd, running, stopped', [
+    ('runpod', ['uv', 'run', '--no-sync', 'runpodctl', 'pod', 'stop', 'X'],
+     {'runtimeStatus': 'RUNNING'}, {'runtimeStatus': 'STOPPED'}),
+    ('vast', ['vastai', 'stop', 'instance', 'X'], {'actual_status': 'running'}, {'actual_status': 'exited'}),
+])
+def test_pod_control_stops_through_the_provider_and_never_destroys(monkeypatch, provider, stop_cmd, running, stopped):
+    control = _pod_control()
+    calls, states = [], iter([running, stopped])
+
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        return SimpleNamespace(stdout=json.dumps(next(states)) if len(calls) > 1 else '')
+    monkeypatch.setattr(control.subprocess, 'run', run)
+    control.stop(provider, 'X', delay=0)
+    assert calls[0] == stop_cmd and len(calls) == 3
+    assert not any('destroy' in c or 'remove' in c or 'delete' in c for cmd in calls for c in cmd)
+
+
+def test_pod_control_raises_when_stop_is_never_confirmed(monkeypatch):
+    control = _pod_control()
+    monkeypatch.setattr(control.subprocess, 'run',
+                        lambda cmd, **kwargs: SimpleNamespace(stdout=json.dumps({'actual_status': None})))
+    with pytest.raises(RuntimeError, match='not confirmed'):
+        control.stop('vast', 'X', attempts=3, delay=0)
