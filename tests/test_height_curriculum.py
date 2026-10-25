@@ -222,6 +222,51 @@ def test_loop_stops_when_last_stage_mastered():
     assert [p for _, p in fake.records] == [90, 100]
 
 
+def test_hold_mode_never_advances_and_runs_exactly_n_blocks():
+    # Every gate passes, so the normal loop would climb a stage per block.
+    fake = FakeSession(Curriculum(upper_mm=22.5), [(True, True, True)] * 10)
+    assert fake.run(hold=True, max_blocks=4) == 'block limit'
+    assert fake.trained == [22.5] * 4 and fake.state.upper_mm == 22.5
+    assert fake.state.history == [] and fake.state.blocks_at_stage == 4
+    assert all(e['would_advance'] and not e['advanced'] and e['next_upper_mm'] == 22.5 for e, _ in fake.records)
+    assert [p for _, p in fake.records] == [22.5] * 4  # Each passing block is a ``best`` candidate.
+
+
+def test_hold_mode_has_no_stall_stop_and_records_would_advance():
+    # Frontier fails 6 times (normal mode stalls after 5), then confirmation fails once.
+    outcomes = [(False, True, None)] * 6 + [(True, True, False)]
+    fake = FakeSession(Curriculum(upper_mm=22.5), outcomes)
+    assert fake.run(hold=True, max_blocks=7) == 'block limit'
+    assert len(fake.trained) == 7
+    assert not any(e['would_advance'] for e, _ in fake.records)
+    assert fake.records[-1][0]['confirmation'] is not None and all(p is None for _, p in fake.records)
+
+
+def test_hold_mode_still_stops_on_regression():
+    fake = FakeSession(Curriculum(upper_mm=22.5), [(True, False, None), (True, False, None)] + [(True, True, True)] * 2)
+    assert fake.run(hold=True, max_blocks=4) == 'regression'
+    assert len(fake.trained) == 2 and fake.state.upper_mm == 22.5
+
+
+def test_walking_quality_from_synthetic_trace(tmp_path):
+    from summarize_height_curriculum import action_std, walking_quality
+
+    def sample(x, age, vx, yaw):
+        return dict(x=x, age=age, finite=True, velocity_body=[vx, 0., 0.], angular_velocity_body=[0., 0., yaw])
+    # Episode 1: young samples (age <= 10) and the edge zone (0.5-0.8 m) are ignored.
+    one = [sample(0., 5, 9., 9.), sample(.1, 11, .2, -1.), sample(.4, 12, .4, 1.), sample(.6, 13, 9., 9.),
+           sample(.9, 14, .3, 0.), sample(1., 15, .5, 0.)]
+    two = [sample(.2, 11, .6, 2.), sample(.9, 12, .7, 0.), dict(sample(1., 13, 99., 99.), finite=False)]
+    (tmp_path / 'h0.0225-d0.55-s20.json').write_text(json.dumps([
+        dict(trace=one, success=True, duration=4.), dict(trace=two, success=False, duration=1.)]))
+    q = walking_quality(tmp_path)
+    # Per-episode means first: before (0.3, 0.6), after (0.4, 0.7), |yaw| (1, 2).
+    assert q == pytest.approx(dict(speed_before_edge=.45, speed_after_landing=.55,
+                                   yaw_rate_before_edge=1.5, time_to_goal_s=4.))
+    assert action_std('Mean action std: 1.05\n...\n  Mean action std: 1.19\n') == 1.19
+    assert action_std('no training output') is None
+
+
 def test_course_entropy_bonus_is_reduced_only_for_course():
     from mjlab_microduck.tasks.cliff.env_cfg import MicroduckCliffCourseRlCfg, MicroduckCliffOracleRlCfg
     assert MicroduckCliffCourseRlCfg.algorithm.entropy_coef == .003

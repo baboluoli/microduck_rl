@@ -6,7 +6,9 @@ process or SSH dies.
 What one session does:
 
 1. GPU runtime tests, then a 5-update smoke run at 64 envs plus ONNX export,
-   with the curriculum staged at its current top height.
+   with the curriculum staged at its current top height. Then a baseline: the
+   source checkpoint gets the same development check (``eval-000-*``, recorded
+   as ``block: 0`` in ``stages.jsonl``), so later blocks have a reference.
 2. A loop of 100-update training blocks (2048 envs, seed 42). After every
    block a fixed-cost check runs on development seeds 20–22:
    - frontier: the current top height at starts 45/55/65 cm;
@@ -18,6 +20,13 @@ What one session does:
    a row, when a stage is still not passed after ``--max-blocks-per-stage``
    blocks (a stall), or when there is not enough time left for another block
    plus its checks (``provisional.json``).
+
+``--hold-height`` keeps the height fixed for ``--blocks`` blocks: the checks
+run as usual and record ``would_advance``, but the stage is never raised and
+there is no stall stop. The regression stop still applies.
+
+Every ``stages.jsonl`` entry carries ``quality``: action std plus the speed,
+wobble and time-to-goal numbers from ``summarize_height_curriculum.walking_quality``.
 
 After every check it saves ``curriculum.json`` and ``selection.json`` and
 appends one line to ``stages.jsonl``. The next session continues from those.
@@ -72,16 +81,23 @@ def sampled_bands(counts, upper):
 
 
 def run_blocks(state, *, train_block, check, confirm, now, deadline, record,
-               max_blocks_per_stage=5, block_budget_s=BLOCK_BUDGET_S):
+               max_blocks_per_stage=5, block_budget_s=BLOCK_BUDGET_S, hold=False, max_blocks=None):
     """The block loop: train, check, maybe confirm and advance, decide to stop.
 
     Pure decision logic. ``train_block(block, warm)`` returns a checkpoint,
     ``check(checkpoint)`` returns development results (frontier + regression),
     ``confirm(checkpoint)`` the frontier on confirmation seeds. ``record`` is
     called after every check with the entry to save. Returns the stop reason.
+
+    ``hold=True`` keeps the height fixed: the same checks run, but the stage
+    is never raised. ``would_advance`` records what the gate would have done.
+    The stall stop is off; the regression stop and time budget still apply.
+    ``max_blocks`` stops the loop after that many blocks.
     """
     block = 0
     while True:
+        if max_blocks is not None and block >= max_blocks:
+            return 'block limit'
         if deadline - now() < block_budget_s:
             return 'time budget'
         block += 1
@@ -91,10 +107,15 @@ def run_blocks(state, *, train_block, check, confirm, now, deadline, record,
         development = check(checkpoint)
         regressed = state.regression(development)
         frontier_passed = all(development[k].passes for k in state.frontier())
-        confirmation, advanced = None, False
+        confirmation, advanced, would_advance = None, False, False
         if frontier_passed and not regressed:
             confirmation = confirm(checkpoint)
-            advanced = state.advance(development, confirmation, str(checkpoint))
+            if hold:
+                # Same test as Curriculum.advance, without changing the state.
+                would_advance = all(confirmation[k].passes for k in state.frontier())
+            else:
+                advanced = state.advance(development, confirmation, str(checkpoint))
+                would_advance = advanced or state.mastered
         mastered = state.mastered
         entry = dict(block=block, checkpoint=str(checkpoint), upper_mm=upper_mm,
                      blocks_at_stage=state.blocks_at_stage if not advanced else
@@ -107,13 +128,17 @@ def run_blocks(state, *, train_block, check, confirm, now, deadline, record,
                      confirmation_passes=None if confirmation is None else
                      {k: v.passes for k, v in confirmation.items()},
                      advanced=advanced, mastered_stage=advanced or mastered,
+                     hold=hold, would_advance=would_advance,
                      next_upper_mm=state.upper_mm, at_unix=now())
-        record(entry, checkpoint, passed_stage=upper_mm if advanced or mastered else None)
+        # In hold mode a passed gate still marks the checkpoint as ``best``
+        # for this height: the candidate to restart the ladder from.
+        passed = would_advance if hold else advanced or mastered
+        record(entry, checkpoint, passed_stage=upper_mm if passed else None)
         if regressed:
             return 'regression'
         if mastered:
             return 'last stage mastered'
-        if not advanced and state.stalled(max_blocks_per_stage):
+        if not hold and not advanced and state.stalled(max_blocks_per_stage):
             return 'stall'
 
 
@@ -149,6 +174,9 @@ def main():
     p.add_argument('--label', default='height-curriculum', help='Training run label prefix')
     p.add_argument('--block-updates', type=int, default=100)
     p.add_argument('--max-blocks-per-stage', type=int, default=5)
+    p.add_argument('--hold-height', action='store_true',
+                   help='Keep the current height: never advance, no stall stop (records would_advance)')
+    p.add_argument('--blocks', type=int, default=4, help='With --hold-height: number of blocks to train')
     args = p.parse_args()
     assert sha(args.source) == args.source_sha, 'Source checkpoint sha256 does not match --source-sha'
     # Reserve 15 minutes for retrieval/shutdown; never exceed two hours.
@@ -161,6 +189,7 @@ def main():
         stages=course.STAGES, max_nan_resets=args.max_nan_resets, label=args.label,
         deadline_epoch=args.deadline_epoch, training_seed=42, training_envs=2048,
         block_updates=args.block_updates, max_blocks_per_stage=args.max_blocks_per_stage,
+        hold_height=args.hold_height, blocks=args.blocks if args.hold_height else None,
         distances=DISTANCES, regression_distance=REGRESSION_DISTANCE,
         development_seeds=DEVELOPMENT_SEEDS, confirmation_seeds=CONFIRMATION_SEEDS,
         block_budget_s=BLOCK_BUDGET_S, retrieval_reserve_s=RETRIEVAL_RESERVE_S,
@@ -196,21 +225,27 @@ def main():
         return text
 
     count = 0
+    last_frontier = {}
 
-    def evaluate(checkpoint, heights, distances, seeds, kind):
+    def evaluate(checkpoint, heights, distances, seeds, kind, number=None):
+        # ``number`` overrides the running count (the baseline is eval-000).
         nonlocal count
-        count += 1
-        directory = args.output / f'eval-{count:03}-{kind}'
+        if number is None:
+            count += 1
+        directory = args.output / f'eval-{count if number is None else number:03}-{kind}'
+        if kind == 'frontier':
+            last_frontier['directory'] = directory
         command(['python', 'scripts/eval_cliff_course.py', str(checkpoint), '--output', str(directory),
                  '--heights', *map(str, heights), '--distances', *map(str, distances),
                  '--seeds', *map(str, seeds)], directory.name)
         return results(directory, heights, distances, seeds)
 
-    def check(checkpoint):
+    def check(checkpoint, number=None):
         upper = state.upper_mm / 1000
-        batch = evaluate(checkpoint, [upper], [d / 100 for d in DISTANCES], DEVELOPMENT_SEEDS, 'frontier')
+        batch = evaluate(checkpoint, [upper], [d / 100 for d in DISTANCES], DEVELOPMENT_SEEDS, 'frontier', number)
         regression = [round(float(k.split('/')[0]) / 1000, 4) for k in state.regression_conditions()]
-        batch.update(evaluate(checkpoint, regression, [REGRESSION_DISTANCE / 100], DEVELOPMENT_SEEDS, 'regression'))
+        batch.update(evaluate(checkpoint, regression, [REGRESSION_DISTANCE / 100], DEVELOPMENT_SEEDS,
+                              'regression', number))
         return batch
 
     def confirm(checkpoint):
@@ -264,8 +299,16 @@ def main():
         selection.update(upper_mm=state.upper_mm, blocks_at_stage=state.blocks_at_stage)
         (args.output / 'selection.json').write_text(json.dumps(selection, indent=2))
 
+    def quality(block, checkpoint):
+        """Walking-quality numbers for one block, from its log and frontier traces."""
+        from summarize_height_curriculum import action_std, checkpoint_action_std, walking_quality
+        log = args.output / f'{args.label}-b{block:02}.log'
+        noise = action_std(log.read_text()) if block else checkpoint_action_std(checkpoint)
+        return dict(action_std=noise, **walking_quality(last_frontier['directory']))
+
     def record(entry, checkpoint, passed_stage):
         entry['sampled_bands'] = sampling.get(entry['block'])
+        entry['quality'] = quality(entry['block'], checkpoint)
         selection['last'] = str(checkpoint)
         if passed_stage is not None:
             selection.update(best=str(checkpoint), best_upper_mm=passed_stage)
@@ -275,7 +318,8 @@ def main():
             f.write(json.dumps(entry) + '\n')
         print(f"[height-curriculum] block {entry['block']} at {entry['upper_mm']:g} mm: "
               f"advanced={entry['advanced']} next={entry['next_upper_mm']:g} mm "
-              f"dev={entry['development_passes']} confirm={entry['confirmation_passes']}", flush=True)
+              f"would_advance={entry['would_advance']} dev={entry['development_passes']} "
+              f"confirm={entry['confirmation_passes']} quality={entry['quality']}", flush=True)
 
     previous = dict(checkpoint=copied, iteration=0)
 
@@ -308,8 +352,24 @@ def main():
         output = model.run(None, {model.get_inputs()[0].name: np.zeros((1, 63), dtype=np.float32)})[0]
         assert output.shape == (1, 14) and np.isfinite(output).all()
         save()
+        # Baseline: the source under the current rules, with the same check.
+        # It does not count toward regression streaks or the stage.
+        baseline = check(copied, number=0)
+        entry = dict(block=0, checkpoint=str(copied), upper_mm=state.upper_mm, blocks_at_stage=state.blocks_at_stage,
+                     development={k: asdict(v) for k, v in baseline.items()},
+                     development_passes={k: v.passes for k, v in baseline.items()},
+                     regression_streaks={k: None for k in state.regression_conditions()},
+                     confirmation=None, confirmation_passes=None, advanced=False, mastered_stage=False,
+                     hold=args.hold_height, would_advance=None, next_upper_mm=state.upper_mm,
+                     baseline=True, at_unix=time.time())
+        entry['quality'] = quality(0, copied)
+        with (args.output / 'stages.jsonl').open('a') as f:
+            f.write(json.dumps(entry) + '\n')
+        print(f"[height-curriculum] baseline at {state.upper_mm:g} mm: dev={entry['development_passes']} "
+              f"quality={entry['quality']}", flush=True)
         reason = run_blocks(state, train_block=train_block, check=check, confirm=confirm, now=time.time,
-                            deadline=deadline, record=record, max_blocks_per_stage=args.max_blocks_per_stage)
+                            deadline=deadline, record=record, max_blocks_per_stage=args.max_blocks_per_stage,
+                            hold=args.hold_height, max_blocks=args.blocks if args.hold_height else None)
         if reason == 'time budget':
             (args.output / 'provisional.json').write_text(json.dumps(dict(
                 checkpoint=selection['last'], reason='Not enough time for another block plus checks',
