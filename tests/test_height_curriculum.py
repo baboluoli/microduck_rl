@@ -1,4 +1,4 @@
-"""Height ladder to 14 cm: bank, stage sampler, curriculum gate and session loop (CPU)."""
+"""Height ladder to 24 cm: bank, stage sampler, curriculum gate and session loop (CPU)."""
 import importlib.util
 import json
 from pathlib import Path
@@ -23,10 +23,10 @@ PASS, FAIL = Result((22, 22, 22), 0, 72), Result((15, 15, 15), 0, 60)
 
 
 def test_bank_keeps_old_rows_and_contains_every_stage():
-    assert len(HEIGHTS) == 57
+    assert len(HEIGHTS) == 67
     assert HEIGHTS[:49][-1] == .10  # Rows up to 10 cm unchanged.
     assert HEIGHTS[:21] == tuple((40 + i) / 2000 for i in range(21))  # Original rows unchanged.
-    assert all(s in HEIGHTS for s in STAGES) and HEIGHTS[-1] == STAGES[-1] == .14
+    assert all(s in HEIGHTS for s in STAGES) and HEIGHTS[-1] == STAGES[-1] == .24
     assert all(b > a for a, b in zip(HEIGHTS, HEIGHTS[1:]))
     # Values pass through argparse (str -> float) and mm/1000 exactly.
     assert all(float(str(s)) in HEIGHTS and round(s * 1000, 1) / 1000 in STAGES for s in STAGES)
@@ -89,7 +89,7 @@ def _all(c, result):
     return {k: result for k in c.conditions()}
 
 
-def test_curriculum_climbs_stages_in_order_and_stops_at_14cm():
+def test_curriculum_climbs_stages_in_order_and_stops_at_24cm():
     c = Curriculum()
     seen = [c.upper_mm]
     while True:
@@ -99,9 +99,9 @@ def test_curriculum_climbs_stages_in_order_and_stops_at_14cm():
             break
         seen.append(c.upper_mm)
     assert [s / 1000 for s in seen] == list(STAGES)
-    assert c.upper_mm == 140 and c.mastered and c.last_stage
+    assert c.upper_mm == 240 and c.mastered and c.last_stage
     assert not c.advance(_all(c, PASS), {k: PASS for k in c.frontier()}, 'again')
-    assert c.upper_mm == 140
+    assert c.upper_mm == 240
 
 
 def test_advance_needs_both_seed_sets_and_ignores_regression():
@@ -217,10 +217,10 @@ def test_loop_respects_time_budget():
 
 
 def test_loop_stops_when_last_stage_mastered():
-    fake = FakeSession(Curriculum(upper_mm=120), [(True, True, True)] * 3)
+    fake = FakeSession(Curriculum(upper_mm=180), [(True, True, True)] * 3)
     assert fake.run() == 'last stage mastered'
-    assert fake.trained == [120, 140]
-    assert [p for _, p in fake.records] == [120, 140]
+    assert fake.trained == [180, 240]
+    assert [p for _, p in fake.records] == [180, 240]
 
 
 def test_hold_mode_never_advances_and_runs_exactly_n_blocks():

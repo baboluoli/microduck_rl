@@ -11,14 +11,17 @@ import torch
 # original 2–3 cm rows at 0.5 mm come first and never move: old checkpoints'
 # row indices and saved ``course_height_counts`` keep their meaning. Taller
 # drops, 32.5–100 mm, are appended at 2.5 mm (49 rows), then 105–140 mm at
-# 5 mm (57 rows in total). Every row is a real terrain tile in every simulated
+# 5 mm (57 rows) and 150–240 mm at 10 mm (67 rows in total). Every row is a real terrain tile in every simulated
 # world, so the bank is kept small: each stage's band still holds 2–4 practice
 # heights. Rows are only ever appended, so older checkpoints keep their meaning.
-HEIGHTS = tuple(t / 10000 for t in (*range(200, 301, 5), *range(325, 1001, 25), *range(1050, 1401, 50)))
+HEIGHTS = tuple(t / 10000 for t in (*range(200, 301, 5), *range(325, 1001, 25), *range(1050, 1401, 50),
+                                    *range(1500, 2401, 100)))
 # Curriculum ladder. Each step is roughly 15–25% harder than the one before;
 # fixed 0.25 cm steps would be tiny near 10 cm and need 32 stages. Above 10 cm
-# the steps are 2 cm (20% then 17% harder), to climb faster.
-STAGES = (.02, .0225, .025, .03, .035, .04, .05, .06, .07, .08, .09, .10, .12, .14)
+# the steps are larger (14, 18, 24 cm: 30–40% harder each), to climb faster.
+# The 10 cm policy already lands 17 of 24 untrained 24 cm drops (one CPU seed,
+# 2026-10-26), so the jumps are not blind. 24 cm is about the robot's height.
+STAGES = (.02, .0225, .025, .03, .035, .04, .05, .06, .07, .08, .09, .10, .14, .18, .24)
 EDGE = .55
 # Historical finish line (3 m past the edge). No longer the success rule; the
 # lower floor still extends past it, up to FORWARD_EDGE.
