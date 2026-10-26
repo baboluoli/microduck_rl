@@ -353,8 +353,8 @@ class MicroduckCourseRunner(MicroduckOnPolicyRunner):
         env = self.env.unwrapped
         counts = getattr(env, '_course_height_counts', None)
         samples = counts.cpu().tolist() if counts is not None else None
-        # One count per course.HEIGHTS row: 20–30 mm at 0.5 mm, then 32.5–100 mm at 2.5 mm.
-        print(f'[course] Actual sampled height counts (course.HEIGHTS rows, 20 to 100 mm): {samples}')
+        # One count per course.HEIGHTS row: 20–30 mm at 0.5 mm, then 32.5–100 mm at 2.5 mm, then 105–140 mm at 5 mm.
+        print(f'[course] Actual sampled height counts (course.HEIGHTS rows, 20 to 140 mm): {samples}')
         super().save(path, {**(infos or {}), 'course_curriculum': asdict(self.course_curriculum),
                             'course_height_counts': samples})
 

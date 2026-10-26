@@ -1,4 +1,4 @@
-"""Gated height curriculum toward 10 cm, on an approved, preflighted pod.
+"""Gated height curriculum toward 14 cm, on an approved, preflighted pod.
 
 Does not provision a pod. An external watchdog must still stop the pod if this
 process or SSH dies.

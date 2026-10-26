@@ -3,7 +3,7 @@
 Each condition is one height/distance pair with exactly 24 first episodes on
 three seeds. Keep development and confirmation results separate at the caller.
 
-The height climbs ``course.STAGES`` (2 cm up to 10 cm). Every check has a fixed
+The height climbs ``course.STAGES`` (2 cm up to 14 cm). Every check has a fixed
 cost, however high the curriculum is:
 
 - frontier: the current top height at starts 45/55/65 cm. It must pass on the
@@ -90,7 +90,7 @@ class Curriculum:
     def advance(self, development, confirmation, checkpoint):
         """Raise the height one stage if the frontier passes on both seed sets.
 
-        A pass at the last stage (10 cm) is recorded in ``history`` but cannot
+        A pass at the last stage (14 cm) is recorded in ``history`` but cannot
         raise the height; the caller sees ``mastered`` become True.
         """
         required = set(self.frontier())
