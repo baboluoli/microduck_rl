@@ -233,6 +233,18 @@ to start a RunPod training run.
   product of Gaussians collapses on any single deficient factor — but pick stds
   wide enough that the CURRENT policy scores visibly, or the gradient is
   invisible and nothing changes.
+- **Don't end training episodes on success** when per-step rewards (upright,
+  pose, air time) keep paying: termination cuts that income, so the policy
+  loiters just short of the goal. Run to the timeout instead (cliff course,
+  2026-10, see `docs/cliff-drop-wrapup-20261026.md`).
+- **Progress rewards need a direction and a speed ceiling.** Body-frame
+  velocity paid walking away from the cliff; world-X-only progress made
+  sideways crab-walking free; capped progress with no overspeed cost made
+  rushing free. Use the velocity recipe's tracking (peaks at the command).
+- **Boundary/out-of-area exits must be terminations, not `time_out=True`**:
+  PPO bootstraps value on time-outs, so leaving the area isn't a failure.
+- **Score the frozen policy under a new success rule before training on it.**
+  A bonus it never reaches (0/72) gives PPO no signal.
 - **Joints parking on hard limits:** fix with a qpos-side limit-proximity
   penalty on the offending joints; the stock `dof_pos_limits` only fires in the
   last ~7.5% of range, and command-side penalties don't work (wide ctrlrange is
@@ -283,6 +295,16 @@ to start a RunPod training run.
   policy was trained under those conditions. Only warm-start across tasks with
   compatible normalizers (the stand expert's twist std is 0.005: never seed a
   walking env from it).
+- **Continuing the same task = resume, not warm start.** Warm start restarts
+  `common_step_counter`, which silently drops every schedule (e.g.
+  `action_rate_l2` −1.0 → −0.1) back to stage 0. That made the cliff gait
+  janky for several sessions. Check the first logged schedule values.
+- **Fine-tuning:** use a lower entropy coefficient (0.003); 0.01 grew action
+  std ~0.1 per 100 updates. Before letting a never-varied input (std 0 in the
+  normalizer) start varying, zero its first-layer weight columns; otherwise
+  untrained random weights feed noise that grows with the value.
+- **If bad habits survive a reward fix, retrain from scratch** on the fixed
+  task rather than fine-tuning more (cliff: ~6 fine-tune sessions vs 1).
 - Deployed-policy provenance: Hub ONNX files carry `run_path=None`; find the run
   by exact last-layer weight match against wandb checkpoints (2026-09: walk =
   441tzs6d@3750, stand = 69u48n8l@9750).
@@ -299,6 +321,9 @@ to start a RunPod training run.
   checkpoints, a success criterion splitting one behavior cluster in half, and
   a pay cap fighting measured physics. Sim metrics can pass while the video
   fails the human eye — watch the video AND check which geom/axis touches.
+- **Longer runs regressed repeatedly** (cliff 999→2998, 500→600→700): evaluate
+  every saved checkpoint and keep the best, not the last. Size episode length
+  and goal distance from command speed × the longest start.
 - Report what rollouts actually show ("rolls but face-plants 1 in 3"), not
   "it works!". The user decides when it's good enough.
 
